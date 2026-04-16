@@ -10,8 +10,6 @@ import {
 
 // ─── Data ────────────────────────────────────────────────────────────────────
 
-const ROLES = ['Frontend Developer', 'Vibecoder', 'Automation Builder', 'UI Designer']
-
 const SKILL_TABS = ['All', 'Frontend', 'Design', 'Automation'] as const
 type SkillTab = typeof SKILL_TABS[number]
 
@@ -57,6 +55,21 @@ const LINKS = [
   { label: 'Instagram', value: '@laurenzma',              href: 'https://instagram.com/laurenzma',            external: true  },
 ]
 
+const CAPABILITIES = [
+  { num: '01', title: 'React',               sub: 'Frontend'   },
+  { num: '02', title: 'TypeScript',          sub: 'Frontend'   },
+  { num: '03', title: 'Tailwind CSS',        sub: 'Frontend'   },
+  { num: '04', title: 'Figma',               sub: 'Design'     },
+  { num: '05', title: 'n8n',                 sub: 'Automation' },
+  { num: '06', title: 'Make',                sub: 'Automation' },
+  { num: '07', title: 'UI Design',           sub: 'Design'     },
+  { num: '08', title: 'Vibe Coding',         sub: 'Frontend'   },
+  { num: '09', title: 'API Integration',     sub: 'Automation' },
+  { num: '10', title: 'Component Libraries', sub: 'Frontend'   },
+  { num: '11', title: 'Workflow Automation', sub: 'Automation' },
+  { num: '12', title: 'Design Systems',      sub: 'Design'     },
+]
+
 // ─── Hooks ───────────────────────────────────────────────────────────────────
 
 function useMousePosition() {
@@ -96,330 +109,6 @@ function useFPS() {
   return fps
 }
 
-// ─── Particle / Globe types ───────────────────────────────────────────────────
-
-interface Particle {
-  // Unit-sphere coordinates (never change)
-  sx: number; sy: number; sz: number
-  // Current 2D rendered position + velocity
-  x: number; y: number; vx: number; vy: number
-  // Spring-target (projected from globe rotation each frame)
-  ox: number; oy: number
-  // Visual
-  size: number; baseAlpha: number; hue: number
-  pulseSpeed: number; pulseOffset: number
-  // Current depth after rotation (−1 … +1)
-  depth: number
-}
-
-interface GlobeState {
-  rotX: number; rotY: number         // current visual rotation (radians)
-  velX: number; velY: number         // angular velocity for inertia
-  dragging: boolean
-}
-
-interface ParticleActions { burst: boolean; rainbow: boolean; shockwaveCenter: boolean }
-interface Shockwave       { x: number; y: number; r: number; maxR: number; alpha: number }
-
-const PARTICLE_COUNT  = 220
-const CONNECTION_DIST = 95
-const MOUSE_LINE_DIST = 160
-const REPEL_RADIUS    = 130
-const SPRING_K        = 0.022
-const DAMPING         = 0.87
-const REPEL_STRENGTH  = 4.5
-const CLICK_STRENGTH  = 18
-
-// ─── Sphere distribution + 3-D helpers ───────────────────────────────────────
-
-function buildParticles(w: number, h: number): Particle[] {
-  const golden = Math.PI * (3 - Math.sqrt(5))
-  return Array.from({ length: PARTICLE_COUNT }, (_, i) => {
-    // Fibonacci sphere surface distribution
-    const yy    = 1 - (i / (PARTICLE_COUNT - 1)) * 2
-    const r     = Math.sqrt(Math.max(0, 1 - yy * yy))
-    const theta = golden * i
-    const sx = r  * Math.cos(theta)
-    const sy = yy
-    const sz = r  * Math.sin(theta)
-    // Initial projected position (sphere facing front, no rotation)
-    const R    = Math.min(w, h) * 0.40
-    const px   = w * 0.5 + sx * R
-    const py   = h * 0.5 + sy * R
-    return {
-      sx, sy, sz,
-      x: px, y: py, vx: 0, vy: 0,
-      ox: px, oy: py,
-      size: 1.1 + Math.random() * 2.6,
-      baseAlpha: 0.55 + Math.random() * 0.45,
-      hue: 248 + Math.random() * 45,
-      pulseSpeed: 0.5 + Math.random() * 1.5,
-      pulseOffset: Math.random() * Math.PI * 2,
-      depth: sz,
-    }
-  })
-}
-
-// Rotate a unit-sphere point by rotX (pitch) then rotY (yaw)
-function rotatePt(sx: number, sy: number, sz: number, rx: number, ry: number) {
-  // Yaw around Y axis
-  const cosY = Math.cos(ry), sinY = Math.sin(ry)
-  const x1   = sx * cosY + sz * sinY
-  const y1   = sy
-  const z1   = -sx * sinY + sz * cosY
-  // Pitch around X axis
-  const cosX = Math.cos(rx), sinX = Math.sin(rx)
-  const x2   = x1
-  const y2   = y1 * cosX - z1 * sinX
-  const z2   = y1 * sinX + z1 * cosX
-  return { x: x2, y: y2, z: z2 }
-}
-
-// ─── Particle Field ───────────────────────────────────────────────────────────
-
-function ParticleField({
-  actionsRef,
-  globeRef,
-}: {
-  actionsRef: React.RefObject<ParticleActions>
-  globeRef:   React.RefObject<GlobeState>
-}) {
-  const canvasRef  = useRef<HTMLCanvasElement>(null)
-  const mouseRef   = useRef({ x: -500, y: -500 })
-  const clickRef   = useRef(false)
-  const frameRef   = useRef<number>(0)
-  const particles  = useRef<Particle[]>([])
-  const shockwaves = useRef<Shockwave[]>([])
-
-  useEffect(() => {
-    const canvas = canvasRef.current!
-    const ctx    = canvas.getContext('2d')!
-
-    const resize = () => {
-      canvas.width  = canvas.offsetWidth
-      canvas.height = canvas.offsetHeight
-      particles.current = buildParticles(canvas.width, canvas.height)
-    }
-    resize()
-    const ro = new ResizeObserver(resize)
-    ro.observe(canvas)
-
-    const onMove = (e: MouseEvent) => {
-      const r = canvas.getBoundingClientRect()
-      mouseRef.current = { x: e.clientX - r.left, y: e.clientY - r.top }
-    }
-    const onClick = (e: MouseEvent) => {
-      const r = canvas.getBoundingClientRect()
-      shockwaves.current.push({ x: e.clientX - r.left, y: e.clientY - r.top, r: 0, maxR: 150, alpha: 0.9 })
-      clickRef.current = true
-      setTimeout(() => { clickRef.current = false }, 80)
-    }
-    canvas.addEventListener('mousemove', onMove)
-    canvas.addEventListener('click', onClick)
-
-    const tick = (time: number) => {
-      const { width: W, height: H } = canvas
-      const mx      = mouseRef.current.x
-      const my      = mouseRef.current.y
-      const ps      = particles.current
-      const actions = actionsRef.current!
-      const globe   = globeRef.current!
-      const R       = Math.min(W, H) * 0.40
-
-      // ── Globe rotation spring / inertia ──────────────────────────
-      if (!globe.dragging) {
-        // Damped spring back to (0,0)
-        globe.velX += (0 - globe.rotX) * 0.012
-        globe.velY += (0 - globe.rotY) * 0.012
-        globe.velX *= 0.88
-        globe.velY *= 0.88
-        globe.rotX += globe.velX
-        globe.rotY += globe.velY
-      }
-
-      // ── Update each particle's 2-D home from sphere projection ────
-      for (const p of ps) {
-        const { x: rx, y: ry, z: rz } = rotatePt(p.sx, p.sy, p.sz, globe.rotX, globe.rotY)
-        p.depth = rz
-        // Perspective projection (fov factor = 2.8)
-        const fov   = 2.8
-        const scale = fov / (fov + rz * 0.5)
-        p.ox = W * 0.5 + rx * R * scale
-        p.oy = H * 0.5 + ry * R * scale
-      }
-
-      // ── Easter egg: spiral burst ───────────────────────────────────
-      if (actions.burst) {
-        actions.burst = false
-        for (const p of ps) {
-          const dx = p.x - W / 2, dy = p.y - H / 2
-          const d  = Math.sqrt(dx * dx + dy * dy) + 1
-          const spd = 8 + Math.random() * 12
-          p.vx += (dx / d) * spd
-          p.vy += (dy / d) * spd
-          const spin = 4 + Math.random() * 6
-          p.vx += (-dy / d) * spin
-          p.vy +=  (dx / d) * spin
-        }
-      }
-
-      // ── Easter egg: center shockwave rings ────────────────────────
-      if (actions.shockwaveCenter) {
-        actions.shockwaveCenter = false
-        const diag = Math.sqrt(W * W + H * H) / 2 + 80
-        shockwaves.current.push({ x: W / 2, y: H / 2, r: 0,  maxR: diag,       alpha: 1.0 })
-        shockwaves.current.push({ x: W / 2, y: H / 2, r: 35, maxR: diag * 0.8, alpha: 0.65 })
-        shockwaves.current.push({ x: W / 2, y: H / 2, r: 70, maxR: diag * 0.6, alpha: 0.35 })
-      }
-
-      ctx.clearRect(0, 0, W, H)
-
-      // ── Physics ────────────────────────────────────────────────────
-      for (const p of ps) {
-        const dx   = p.x - mx, dy = p.y - my
-        const dist = Math.sqrt(dx * dx + dy * dy)
-        if (dist < REPEL_RADIUS && dist > 0.01) {
-          const strength = clickRef.current ? CLICK_STRENGTH : REPEL_STRENGTH
-          const force    = Math.pow((REPEL_RADIUS - dist) / REPEL_RADIUS, 1.6) * strength
-          p.vx += (dx / dist) * force
-          p.vy += (dy / dist) * force
-        }
-        const bx = Math.sin(time * 0.0003 + p.ox * 0.01) * 1.5
-        const by = Math.cos(time * 0.0004 + p.oy * 0.01) * 1.5
-        p.vx += (p.ox + bx - p.x) * SPRING_K
-        p.vy += (p.oy + by - p.y) * SPRING_K
-        p.vx *= DAMPING; p.vy *= DAMPING
-        p.x  += p.vx;    p.y  += p.vy
-      }
-
-      // ── Depth-based alpha (back hemisphere fades) ──────────────────
-      // depth: −1 (far back) … +1 (front center)
-      // alpha multiplier: 0.06 at back edge, 1.0 at front
-      const depthAlpha = (p: Particle) => Math.max(0.06, (p.depth + 1.1) / 2.1)
-
-      // ── Connection lines (front hemisphere only) ───────────────────
-      ctx.lineWidth = 0.5
-      for (let i = 0; i < ps.length; i++) {
-        if (ps[i].depth < -0.15) continue
-        for (let j = i + 1; j < ps.length; j++) {
-          if (ps[j].depth < -0.15) continue
-          const dx   = ps[i].x - ps[j].x, dy = ps[i].y - ps[j].y
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < CONNECTION_DIST) {
-            const minDepth = Math.min(depthAlpha(ps[i]), depthAlpha(ps[j]))
-            const op = (1 - dist / CONNECTION_DIST) * 0.32 * minDepth
-            ctx.strokeStyle = `rgba(139,92,246,${op})`
-            ctx.beginPath()
-            ctx.moveTo(ps[i].x, ps[i].y)
-            ctx.lineTo(ps[j].x, ps[j].y)
-            ctx.stroke()
-          }
-        }
-      }
-
-      // ── Cursor web lines ──────────────────────────────────────────
-      if (mx > -400) {
-        for (const p of ps) {
-          if (p.depth < 0) continue
-          const dx   = p.x - mx, dy = p.y - my
-          const dist = Math.sqrt(dx * dx + dy * dy)
-          if (dist < MOUSE_LINE_DIST) {
-            const t  = 1 - dist / MOUSE_LINE_DIST
-            const op = t * t * 0.95 * depthAlpha(p)
-            ctx.lineWidth   = 0.6 + t * 1.6
-            ctx.strokeStyle = `rgba(210,185,255,${op})`
-            ctx.beginPath()
-            ctx.moveTo(mx, my)
-            ctx.lineTo(p.x, p.y)
-            ctx.stroke()
-          }
-        }
-      }
-
-      // ── Draw particles ─────────────────────────────────────────────
-      for (const p of ps) {
-        const da    = depthAlpha(p)
-        const a     = p.baseAlpha * da
-        const pulse = 0.78 + 0.22 * Math.sin(time * 0.0009 * p.pulseSpeed + p.pulseOffset)
-        const h     = actions.rainbow
-          ? ((time * 0.22 + p.sx * 180 + p.sy * 120) % 360)
-          : p.hue
-        const glowMul = actions.rainbow ? 5 : 1
-
-        // Outer pulsing ring
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.size * 2.4 * pulse, 0, Math.PI * 2)
-        ctx.strokeStyle = `hsla(${h},65%,62%,${0.1 * a})`
-        ctx.lineWidth = 0.6
-        ctx.stroke()
-
-        // Extra rainbow ring
-        if (actions.rainbow) {
-          ctx.beginPath()
-          ctx.arc(p.x, p.y, p.size * 3.8 * pulse, 0, Math.PI * 2)
-          ctx.strokeStyle = `hsla(${(h + 60) % 360},90%,70%,${0.18 * a})`
-          ctx.lineWidth = 1.2
-          ctx.stroke()
-        }
-
-        // Middle ring
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.size * 1.5, 0, Math.PI * 2)
-        ctx.strokeStyle = `hsla(${h},68%,65%,${0.28 * a})`
-        ctx.lineWidth = 0.75
-        ctx.stroke()
-
-        // Core with glow — extra bloom when cursor is near
-        const mdx = p.x - mx, mdy = p.y - my
-        const mouseDist = Math.sqrt(mdx * mdx + mdy * mdy)
-        const mouseBloom = mouseDist < 140 ? Math.pow(1 - mouseDist / 140, 1.4) * 18 : 0
-        ctx.shadowColor = `hsla(${h},85%,75%,0.95)`
-        ctx.shadowBlur  = (p.size * 5 + mouseBloom) * glowMul
-        ctx.beginPath()
-        ctx.arc(p.x, p.y, p.size * 0.55, 0, Math.PI * 2)
-        ctx.fillStyle = `hsla(${h},80%,88%,${a})`
-        ctx.fill()
-        ctx.shadowBlur = 0
-      }
-
-      // ── Shockwave rings ───────────────────────────────────────────
-      for (let i = shockwaves.current.length - 1; i >= 0; i--) {
-        const sw = shockwaves.current[i]
-        sw.r     += 4.2
-        sw.alpha *= 0.935
-        if (sw.alpha < 0.01 || sw.r > sw.maxR) {
-          shockwaves.current.splice(i, 1)
-          continue
-        }
-        ctx.beginPath()
-        ctx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(167,139,250,${sw.alpha})`
-        ctx.lineWidth   = 1.8
-        ctx.stroke()
-        if (sw.r > 20) {
-          ctx.beginPath()
-          ctx.arc(sw.x, sw.y, sw.r * 0.68, 0, Math.PI * 2)
-          ctx.strokeStyle = `rgba(139,92,246,${sw.alpha * 0.45})`
-          ctx.lineWidth   = 0.8
-          ctx.stroke()
-        }
-      }
-
-      frameRef.current = requestAnimationFrame(tick)
-    }
-    frameRef.current = requestAnimationFrame(tick)
-
-    return () => {
-      cancelAnimationFrame(frameRef.current)
-      ro.disconnect()
-      canvas.removeEventListener('mousemove', onMove)
-      canvas.removeEventListener('click', onClick)
-    }
-  }, [actionsRef, globeRef])
-
-  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" style={{ cursor: 'none' }} />
-}
-
 // ─── Cursor Click Effect ──────────────────────────────────────────────────────
 
 function CursorClickEffect() {
@@ -452,47 +141,6 @@ function CursorClickEffect() {
   )
 }
 
-// ─── Scramble name ────────────────────────────────────────────────────────────
-
-const GLYPHS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#!$%&?'
-
-function ScrambleLetter({ char, className = '' }: { char: string; className?: string }) {
-  const [display, setDisplay] = useState(char)
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const scramble = () => {
-    if (char === ' ') return
-    let n = 0
-    clearInterval(timer.current!)
-    timer.current = setInterval(() => {
-      setDisplay(GLYPHS[Math.floor(Math.random() * GLYPHS.length)])
-      n++
-      if (n >= 8) { clearInterval(timer.current!); setDisplay(char) }
-    }, 38)
-  }
-
-  return (
-    <motion.span
-      className={`inline-block cursor-default ${className}`}
-      style={{ minWidth: char === ' ' ? '0.35em' : undefined }}
-      onHoverStart={scramble}
-      whileHover={char !== ' ' ? { y: -5, color: '#c4b5fd' } : {}}
-      transition={{ type: 'spring', stiffness: 600, damping: 14 }}
-    >
-      {display}
-    </motion.span>
-  )
-}
-
-function ScrambleName({ text, className = '' }: { text: string; className?: string }) {
-  return (
-    <span className={className}>
-      {text.split('').map((char, i) => (
-        <ScrambleLetter key={i} char={char.toUpperCase()} />
-      ))}
-    </span>
-  )
-}
 
 // ─── Shooting Stars ───────────────────────────────────────────────────────────
 
@@ -512,30 +160,24 @@ function ShootingStars() {
       const id  = nextId.current++
       const vw  = window.innerWidth
       const vh  = window.innerHeight
-      const ang = 18 + Math.random() * 28          // 18–46° angle
+      const ang = 18 + Math.random() * 28
       const rad = ang * Math.PI / 180
-      const len = 130 + Math.random() * 180         // trail length
-      // Travel distance = 80–140% of viewport width
-      const dist   = vw * (0.8 + Math.random() * 0.6)
+      const len = 130 + Math.random() * 180
+      const dist    = vw * (0.8 + Math.random() * 0.6)
       const travelX = dist * Math.cos(rad)
       const travelY = dist * Math.sin(rad)
-      const dur    = 1.1 + Math.random() * 0.8
+      const dur     = 1.1 + Math.random() * 0.8
 
-      // Spawn point: from top edge or left edge, slightly off-screen
       const fromTop = Math.random() > 0.2
-      const startX  = fromTop
-        ? Math.random() * (vw * 1.3) - vw * 0.15   // across full width + bleed
-        : -len - 20
-      const startY  = fromTop
-        ? -(len * Math.sin(rad)) - 15               // just above viewport
-        : Math.random() * vh * 0.55
+      const startX  = fromTop ? Math.random() * (vw * 1.3) - vw * 0.15 : -len - 20
+      const startY  = fromTop ? -(len * Math.sin(rad)) - 15 : Math.random() * vh * 0.55
 
       const star: Star = { id, startX, startY, travelX, travelY, angle: ang, length: len, duration: dur }
       setStars(prev => [...prev, star])
       setTimeout(() => setStars(prev => prev.filter(s => s.id !== id)), (dur + 0.4) * 1000)
       setTimeout(spawn, 3500 + Math.random() * 7000)
     }
-    const t = setTimeout(spawn, 1800 + Math.random() * 2500)
+    const t = setTimeout(spawn, 2200 + Math.random() * 2000)
     return () => clearTimeout(t)
   }, [])
 
@@ -548,16 +190,11 @@ function ShootingStars() {
             left: star.startX, top: star.startY,
             width: star.length, height: 1.5,
             rotate: star.angle, transformOrigin: 'left center',
-            background: 'linear-gradient(90deg, transparent 0%, rgba(167,139,250,0.75) 45%, rgba(255,255,255,0.95) 100%)',
+            background: 'linear-gradient(90deg,transparent 0%,rgba(167,139,250,0.75) 45%,rgba(255,255,255,0.95) 100%)',
             borderRadius: 2,
           }}
           initial={{ scaleX: 0, opacity: 0, x: 0, y: 0 }}
-          animate={{
-            scaleX: [0, 1, 1],
-            opacity: [0, 0.95, 0],
-            x: star.travelX,
-            y: star.travelY,
-          }}
+          animate={{ scaleX: [0, 1, 1], opacity: [0, 0.95, 0], x: star.travelX, y: star.travelY }}
           transition={{ duration: star.duration, ease: [0.15, 0, 0.7, 1] }}
         />
       ))}
@@ -587,7 +224,7 @@ function CursorTrail({ mouse }: { mouse: { x: number; y: number } }) {
             style={{
               x: dot.x - size / 2, y: dot.y - size / 2,
               width: size, height: size,
-              background: `hsl(${255 + i * 2}, 70%, ${50 + i * 2}%)`,
+              background: `hsl(${255 + i * 2},70%,${50 + i * 2}%)`,
             }}
             initial={{ opacity: 0.75, scale: 1 }}
             animate={{ opacity: 0, scale: 0.1 }}
@@ -601,29 +238,11 @@ function CursorTrail({ mouse }: { mouse: { x: number; y: number } }) {
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────
 
-function AnimatedRole() {
-  const [index, setIndex] = useState(0)
-  useEffect(() => {
-    const id = setInterval(() => setIndex(i => (i + 1) % ROLES.length), 2800)
-    return () => clearInterval(id)
-  }, [])
-  return (
-    <div className="h-5 overflow-hidden relative inline-flex items-center min-w-[180px]">
-      <AnimatePresence mode="wait">
-        <motion.span key={index} className="absolute font-mono text-[10px] tracking-[0.2em] text-violet-400 uppercase"
-          initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -20, opacity: 0 }}
-          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}>
-          {ROLES[index]}
-        </motion.span>
-      </AnimatePresence>
-    </div>
-  )
-}
 
 function Marquee({ text }: { text: string }) {
   const repeated = (text + '  ·  ').repeat(6)
   return (
-    <div className="overflow-hidden whitespace-nowrap border-y border-[#111] py-3 bg-[#000]">
+    <div className="overflow-hidden whitespace-nowrap border-y border-[#111] py-3 bg-[#06040e]">
       <motion.span className="inline-block font-mono text-[11px] text-[#252525] tracking-[0.2em] uppercase"
         animate={{ x: ['0%', '-50%'] }}
         transition={{ duration: 65, repeat: Infinity, ease: 'linear' }}>
@@ -671,7 +290,248 @@ function MagneticBtn({ href, children, external = false, className = '' }: {
   )
 }
 
-// ─── Sections ────────────────────────────────────────────────────────────────
+// ─── Capability Drag Strip ────────────────────────────────────────────────────
+
+function CapabilityStrip({ reveal }: { reveal: boolean }) {
+  const outerRef = useRef<HTMLDivElement>(null)
+  const innerRef = useRef<HTMLDivElement>(null)
+  const [dragLeft, setDragLeft] = useState(0)
+
+  useEffect(() => {
+    const calc = () => {
+      const outer = outerRef.current
+      const inner = innerRef.current
+      if (!outer || !inner) return
+      const overflow = inner.scrollWidth - outer.clientWidth
+      setDragLeft(overflow > 0 ? -overflow : 0)
+    }
+    const t = setTimeout(calc, 80)
+    window.addEventListener('resize', calc)
+    return () => { clearTimeout(t); window.removeEventListener('resize', calc) }
+  }, [])
+
+  return (
+    <div ref={outerRef} className="overflow-hidden w-full select-none py-0.5">
+      <motion.div
+        ref={innerRef}
+        drag="x"
+        dragConstraints={{ left: dragLeft, right: 0 }}
+        dragElastic={0.07}
+        dragTransition={{ bounceStiffness: 520, bounceDamping: 42 }}
+        whileDrag={{ cursor: 'grabbing' }}
+        style={{ cursor: 'grab' }}
+        className="flex gap-3 w-max"
+      >
+        {CAPABILITIES.map((cap, i) => (
+          <motion.div
+            key={cap.num}
+            className="flex-shrink-0 w-[158px] rounded-2xl p-5 border relative overflow-hidden group"
+            style={{ borderColor: '#13102a', background: '#080614' }}
+            initial={{ opacity: 0, y: 22 }}
+            animate={reveal ? { opacity: 1, y: 0 } : { opacity: 0, y: 22 }}
+            transition={{ delay: 1.25 + i * 0.05, duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            whileHover={{ borderColor: 'rgba(139,92,246,0.50)', background: '#0f0820' }}
+          >
+            <span className="font-mono text-[10px] text-[#1e183a] block mb-7 group-hover:text-[#2d2550] transition-colors duration-200">
+              {cap.num}
+            </span>
+            <p className="text-[#666] font-semibold text-sm leading-tight group-hover:text-white transition-colors duration-200">
+              {cap.title}
+            </p>
+            <p className="font-mono text-[10px] text-[#24203a] mt-1.5 group-hover:text-violet-500/60 transition-colors duration-200">
+              {cap.sub}
+            </p>
+            {/* bottom glow on hover */}
+            <div
+              className="absolute inset-0 rounded-2xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+              style={{ background: 'radial-gradient(ellipse at 50% 130%,rgba(139,92,246,0.14) 0%,transparent 65%)' }}
+            />
+          </motion.div>
+        ))}
+      </motion.div>
+    </div>
+  )
+}
+
+// ─── Hero ─────────────────────────────────────────────────────────────────────
+
+const HEADLINE_LINES = ['I DESIGN.', 'I BUILD.', 'I SHIP.']
+
+function HeroSection() {
+  const [reveal, setReveal] = useState(false)
+
+  useEffect(() => {
+    // Start revealing while curtain is mid-lift (~0.75s into 1.05s animation)
+    const t = setTimeout(() => setReveal(true), 850)
+    return () => clearTimeout(t)
+  }, [])
+
+  return (
+    <section className="relative h-screen overflow-hidden flex flex-col px-6 sm:px-10">
+
+      {/* Dot-grid background — pure CSS, zero JS cost */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage: 'radial-gradient(circle, rgba(100,70,200,0.17) 1px, transparent 1px)',
+          backgroundSize: '34px 34px',
+        }}
+      />
+      {/* Radial vignette — edges fade to bg colour */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: 'radial-gradient(ellipse 90% 80% at 50% 40%, transparent 20%, #06040e 100%)',
+        }}
+      />
+      {/* Soft centre bloom */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: 'radial-gradient(ellipse 55% 45% at 50% 38%, rgba(80,30,180,0.07) 0%, transparent 100%)',
+        }}
+      />
+
+      {/* Eyebrow */}
+      <div className="overflow-hidden pt-[7.5rem]">
+        <motion.p
+          className="font-mono text-[10px] text-[#2e2e3a] tracking-[0.28em] uppercase"
+          initial={{ y: '120%' }}
+          animate={reveal ? { y: 0 } : {}}
+          transition={{ duration: 0.75, ease: [0.16, 1, 0.3, 1] }}
+        >
+          Frontend Developer&nbsp;&nbsp;·&nbsp;&nbsp;Automation Builder&nbsp;&nbsp;·&nbsp;&nbsp;Berlin
+        </motion.p>
+      </div>
+
+      {/* ── Headline + right column ── */}
+      <div className="flex-1 flex flex-col justify-center">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] items-end gap-y-6 lg:gap-x-12">
+
+          {/* Three-line headline — each line clips up */}
+          <div>
+            {HEADLINE_LINES.map((line, i) => (
+              <div key={line} className="overflow-hidden">
+                <motion.div
+                  initial={{ y: '108%' }}
+                  animate={reveal ? { y: 0 } : {}}
+                  transition={{
+                    duration: 1.08,
+                    delay: 0.06 + i * 0.11,
+                    ease: [0.16, 1, 0.3, 1],
+                  }}
+                >
+                  <span
+                    className="font-black tracking-tight block"
+                    style={{
+                      fontSize: 'clamp(50px, 10.5vw, 150px)',
+                      lineHeight: 1.0,
+                      ...(i < 2
+                        ? { color: '#e8e8e8' }
+                        : {
+                            background: 'linear-gradient(130deg,#8b5cf6 0%,#6366f1 45%,#a78bfa 100%)',
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent',
+                            backgroundClip: 'text',
+                          }),
+                    }}
+                  >
+                    {line}
+                  </span>
+                </motion.div>
+              </div>
+            ))}
+          </div>
+
+          {/* Right: description + CTA — desktop only */}
+          <div className="hidden lg:flex flex-col justify-end gap-6 pb-1">
+            <motion.p
+              className="text-sm text-[#3d3d50] leading-relaxed"
+              initial={{ opacity: 0, y: 18 }}
+              animate={reveal ? { opacity: 1, y: 0 } : {}}
+              transition={{ delay: 0.48, duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
+            >
+              React &amp; TypeScript on the frontend.<br />
+              n8n &amp; Make for automation.<br />
+              Finishing studies in Berlin —<br />
+              actively looking for full-time roles.
+            </motion.p>
+            <motion.div
+              className="flex items-center gap-4"
+              initial={{ opacity: 0, y: 14 }}
+              animate={reveal ? { opacity: 1, y: 0 } : {}}
+              transition={{ delay: 0.60, duration: 0.75 }}
+            >
+              <a
+                href="mailto:laurenz.maass@gmail.com"
+                className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-all duration-300 hover:scale-105 cursor-none shadow-[0_0_22px_rgba(139,92,246,0.35)]"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                Get in touch
+              </a>
+              <span className="font-mono text-[10px] text-[#2a2a3a] flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                Open to work
+              </span>
+            </motion.div>
+          </div>
+        </div>
+
+        {/* Mobile CTA */}
+        <motion.div
+          className="lg:hidden mt-5 flex flex-wrap items-center gap-4"
+          initial={{ opacity: 0, y: 14 }}
+          animate={reveal ? { opacity: 1, y: 0 } : {}}
+          transition={{ delay: 0.42, duration: 0.72 }}
+        >
+          <a
+            href="mailto:laurenz.maass@gmail.com"
+            className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-all duration-300 cursor-none shadow-[0_0_22px_rgba(139,92,246,0.35)]"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+            Get in touch
+          </a>
+          <span className="font-mono text-[10px] text-[#2a2a3a] flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+            Open to work
+          </span>
+        </motion.div>
+      </div>
+
+      {/* ── Capability drag strip ── */}
+      <motion.div
+        className="pb-2"
+        initial={{ opacity: 0 }}
+        animate={reveal ? { opacity: 1 } : {}}
+        transition={{ delay: 1.0, duration: 0.7 }}
+      >
+        <CapabilityStrip reveal={reveal} />
+      </motion.div>
+
+      {/* Bottom bar */}
+      <div className="pb-10 flex items-center justify-between">
+        <motion.span
+          className="font-mono text-[10px] text-[#1e1e30] tracking-widest uppercase"
+          initial={{ opacity: 0 }}
+          animate={reveal ? { opacity: 1 } : {}}
+          transition={{ delay: 1.55, duration: 0.8 }}
+        >
+          drag to explore →
+        </motion.span>
+        <motion.span
+          className="font-mono text-[10px] text-[#252538]"
+          initial={{ opacity: 0 }}
+          animate={reveal ? { opacity: 1 } : {}}
+          transition={{ delay: 1.65, duration: 0.8 }}
+        >
+          scroll ↓
+        </motion.span>
+      </div>
+    </section>
+  )
+}
+
+// ─── Sections ─────────────────────────────────────────────────────────────────
 
 function AboutSection() {
   const ref = useRef(null)
@@ -831,118 +691,113 @@ function ContactSection() {
 // ─── App ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const mouse = useMousePosition()
-  const time  = useBerlinTime()
-  const fps   = useFPS()
+  const mouse  = useMousePosition()
+  const time   = useBerlinTime()
+  const fps    = useFPS()
   const { scrollYProgress } = useScroll()
   const scaleX = useSpring(scrollYProgress, { stiffness: 100, damping: 30 })
 
-  // Canvas action flags
-  const actionsRef = useRef<ParticleActions>({ burst: false, rainbow: false, shockwaveCenter: false })
-
-  // Globe rotation state (read directly by canvas each frame)
-  const globeRef   = useRef<GlobeState>({ rotX: 0, rotY: 0, velX: 0, velY: 0, dragging: false })
-
-  // Globe drag handlers — delta-accumulation for high sensitivity
-  const lastDrag      = useRef({ x: 0, y: 0 })
-  const [dragging, setDragging] = useState(false)
-
-  const onHeroMouseDown = useCallback((e: React.MouseEvent) => {
-    lastDrag.current = { x: e.clientX, y: e.clientY }
-    globeRef.current.dragging = true
-    globeRef.current.velX = 0
-    globeRef.current.velY = 0
-    setDragging(true)
+  // ── Opening curtain ──────────────────────────────────────────────────────
+  const [curtain, setCurtain] = useState(true)
+  useEffect(() => {
+    const t = setTimeout(() => setCurtain(false), 750)
+    return () => clearTimeout(t)
   }, [])
 
-  const onHeroMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!globeRef.current.dragging) return
-    const dx = e.clientX - lastDrag.current.x
-    const dy = e.clientY - lastDrag.current.y
-    lastDrag.current = { x: e.clientX, y: e.clientY }
-    // High sensitivity: ~180° rotation per 300px drag
-    globeRef.current.rotY += dx * 0.012
-    globeRef.current.rotX -= dy * 0.012
-  }, [])
-
-  const onHeroMouseUp = useCallback(() => {
-    globeRef.current.dragging = false
-    setDragging(false)
-  }, [])
-
-  // Easter egg state
+  // ── Easter eggs ──────────────────────────────────────────────────────────
   const logoClicksRef             = useRef(0)
   const [egg1Msg, setEgg1Msg]     = useState(false)
   const [rainbowOn, setRainbowOn] = useState(false)
   const [screenFlash, setScreenFlash] = useState(false)
 
-  const handleLogoClick = () => {
+  const handleLogoClick = useCallback(() => {
     logoClicksRef.current++
     if (logoClicksRef.current >= 5) {
       logoClicksRef.current = 0
-      actionsRef.current.burst           = true
-      actionsRef.current.shockwaveCenter = true
       setScreenFlash(true)
       setTimeout(() => setScreenFlash(false), 700)
       setEgg1Msg(true)
       setTimeout(() => setEgg1Msg(false), 3200)
     }
-  }
+  }, [])
 
-  const handleHiddenBtn = () => {
+  const handleHiddenBtn = useCallback(() => {
     if (rainbowOn) return
-    actionsRef.current.rainbow = true
     setRainbowOn(true)
-    setTimeout(() => {
-      actionsRef.current.rainbow = false
-      setRainbowOn(false)
-    }, 12000)
-  }
+    setTimeout(() => setRainbowOn(false), 12000)
+  }, [rainbowOn])
 
   return (
     <div className="bg-[#06040e] text-[#e8e8e8] min-h-screen font-sans antialiased cursor-none overflow-x-hidden">
 
+      {/* Scroll progress */}
       <motion.div style={{ scaleX }} className="fixed top-0 left-0 right-0 h-[2px] bg-violet-500 origin-left z-50" />
+
+      {/* ── Opening curtain ── */}
+      <AnimatePresence>
+        {curtain && (
+          <motion.div
+            key="curtain"
+            className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-5"
+            style={{ background: '#06040e' }}
+            initial={{ y: '0%' }}
+            exit={{ y: '-100%' }}
+            transition={{ duration: 1.05, ease: [0.76, 0, 0.24, 1] }}
+          >
+            <motion.span
+              className="font-mono text-[13px] text-[#2a2a2a] tracking-[0.55em] uppercase"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.35 }}
+            >
+              LM
+            </motion.span>
+            {/* Loading bar */}
+            <div className="w-28 h-px bg-[#111] overflow-hidden relative rounded-full">
+              <motion.div
+                className="absolute inset-y-0 left-0 rounded-full"
+                style={{ background: 'rgba(139,92,246,0.7)' }}
+                initial={{ width: '0%' }}
+                animate={{ width: '100%' }}
+                transition={{ duration: 0.62, ease: [0.4, 0, 0.6, 1] }}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <ShootingStars />
       <CursorTrail mouse={mouse} />
       <CursorClickEffect />
 
-      {/* Screen flash — easter egg 1 */}
+      {/* Screen flash */}
       <AnimatePresence>
         {screenFlash && (
           <motion.div
             className="fixed inset-0 z-[47] pointer-events-none"
-            initial={{ opacity: 0.8 }}
-            animate={{ opacity: 0 }}
-            exit={{ opacity: 0 }}
+            initial={{ opacity: 0.8 }} animate={{ opacity: 0 }} exit={{ opacity: 0 }}
             transition={{ duration: 0.7, ease: 'easeOut' }}
-            style={{ background: 'radial-gradient(ellipse at center, rgba(139,92,246,0.7) 0%, rgba(109,40,217,0.3) 55%, transparent 100%)' }}
+            style={{ background: 'radial-gradient(ellipse at center,rgba(139,92,246,0.7) 0%,rgba(109,40,217,0.3) 55%,transparent 100%)' }}
           />
         )}
       </AnimatePresence>
 
-      {/* Rainbow overlay — rotating conic gradient */}
+      {/* Rainbow overlay */}
       <AnimatePresence>
         {rainbowOn && (
           <motion.div
-            key="rainbow-overlay"
+            key="rainbow"
             className="fixed inset-0 z-[3] pointer-events-none"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={{ duration: 0.6 }}
           >
-            {/* Rotating conic sweep */}
             <motion.div
               className="absolute inset-[-50%]"
               animate={{ rotate: 360 }}
               transition={{ duration: 7, repeat: Infinity, ease: 'linear' }}
-              style={{
-                background: 'conic-gradient(from 0deg, rgba(255,0,100,0.22), rgba(255,140,0,0.20), rgba(255,255,0,0.18), rgba(0,255,120,0.20), rgba(0,180,255,0.22), rgba(160,0,255,0.22), rgba(255,0,100,0.22))',
-              }}
+              style={{ background: 'conic-gradient(from 0deg,rgba(255,0,100,0.22),rgba(255,140,0,0.20),rgba(255,255,0,0.18),rgba(0,255,120,0.20),rgba(0,180,255,0.22),rgba(160,0,255,0.22),rgba(255,0,100,0.22))' }}
             />
-            {/* Pulsing edge glow */}
             <motion.div
               className="absolute inset-0"
               animate={{ opacity: [0.5, 1, 0.5] }}
@@ -953,23 +808,19 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Cursor dot */}
-      <motion.div className="fixed top-0 left-0 w-3 h-3 rounded-full bg-violet-400 pointer-events-none z-50 mix-blend-screen"
+      {/* Custom cursor */}
+      <motion.div
+        className="fixed top-0 left-0 w-3 h-3 rounded-full bg-violet-400 pointer-events-none z-50 mix-blend-screen"
         animate={{ x: mouse.x - 6, y: mouse.y - 6 }}
-        transition={{ type: 'spring', stiffness: 700, damping: 30, mass: 0.12 }} />
-      {/* Cursor ring — scales when dragging */}
-      <motion.div className="fixed top-0 left-0 rounded-full pointer-events-none z-50"
-        animate={{
-          x: mouse.x - 20, y: mouse.y - 20,
-          scale: dragging ? 2.0 : 1,
-          borderColor: dragging ? 'rgba(139,92,246,0.55)' : 'rgba(139,92,246,0.25)',
-        }}
+        transition={{ type: 'spring', stiffness: 700, damping: 30, mass: 0.12 }}
+      />
+      <motion.div
+        className="fixed top-0 left-0 rounded-full pointer-events-none z-50"
+        animate={{ x: mouse.x - 20, y: mouse.y - 20 }}
         style={{ width: 40, height: 40, border: '1px solid rgba(139,92,246,0.25)' }}
         transition={{
           x: { type: 'spring', stiffness: 180, damping: 22, mass: 0.6 },
           y: { type: 'spring', stiffness: 180, damping: 22, mass: 0.6 },
-          scale: { type: 'spring', stiffness: 300, damping: 20 },
-          borderColor: { duration: 0.2 },
         }}
       />
 
@@ -1019,61 +870,8 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* HERO */}
-      <section
-        className="relative h-screen overflow-hidden"
-        onMouseDown={onHeroMouseDown}
-        onMouseMove={onHeroMouseMove}
-        onMouseUp={onHeroMouseUp}
-        onMouseLeave={onHeroMouseUp}
-      >
-        <ParticleField actionsRef={actionsRef} globeRef={globeRef} />
-
-        {/* Ambient glow — gives the void some depth */}
-        <div className="absolute inset-0 pointer-events-none"
-          style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 48%, rgba(88,28,220,0.07) 0%, rgba(60,10,160,0.04) 45%, transparent 100%)' }} />
-
-        {/* Vignette */}
-        <div className="absolute inset-0 pointer-events-none"
-          style={{ background: 'radial-gradient(ellipse at center, transparent 50%, rgba(6,4,14,0.85) 100%)' }} />
-
-        {/* Name + CTA — bottom-left */}
-        <div className="absolute bottom-12 left-6 sm:left-10 z-10">
-          <motion.div
-            className="flex items-baseline gap-2 mb-2 flex-wrap"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <ScrambleName
-              text="Laurenz Maass"
-              className="text-2xl sm:text-3xl font-black tracking-tight text-white"
-            />
-            <span className="text-[#2a2a2a] mx-1">·</span>
-            <AnimatedRole />
-          </motion.div>
-          <motion.div className="flex flex-wrap items-center gap-5"
-            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.55, duration: 0.7 }}>
-            <a href="mailto:laurenz.maass@gmail.com"
-              className="flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-all duration-300 hover:scale-105 cursor-none shadow-[0_0_24px_rgba(139,92,246,0.35)]">
-              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              Get in touch
-            </a>
-            <span className="font-mono text-[10px] text-[#2a2a2a] flex items-center gap-2">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Open to work
-            </span>
-          </motion.div>
-        </div>
-
-        {/* Hint — bottom-right */}
-        <motion.div className="absolute bottom-12 right-6 sm:right-10 z-10 text-right"
-          initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.4, duration: 1 }}>
-          <p className="font-mono text-[10px] text-[#252525] tracking-widest uppercase">hover · click · drag</p>
-        </motion.div>
-      </section>
-
+      {/* Page sections */}
+      <HeroSection />
       <Marquee text="Frontend Developer · Vibecoder · Automation Builder · UI Designer · Berlin · n8n · React · Make · Open to Work" />
       <AboutSection />
       <Marquee text="UI Design · React · TypeScript · Tailwind · n8n · Make · Figma · Vibe Coding · Workflow Automation · API Integration" />
@@ -1085,7 +883,6 @@ export default function App() {
         <span className="font-mono text-[11px] text-[#1e1e1e]">© 2025 Laurenz Maass</span>
         <span className="font-mono text-[11px] text-[#1e1e1e]">
           Built with intention
-          {/* Hidden easter egg — nearly invisible dot */}
           <button
             onClick={handleHiddenBtn}
             className="font-mono text-[11px] cursor-none select-none ml-px"
