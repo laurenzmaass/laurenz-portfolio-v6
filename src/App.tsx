@@ -5,6 +5,7 @@ import {
   useSpring,
   useInView,
   useMotionValue,
+  useTransform,
   AnimatePresence,
 } from 'framer-motion'
 
@@ -69,6 +70,22 @@ const CAPABILITIES = [
   { num: '11', title: 'Workflow Automation', sub: 'Automation' },
   { num: '12', title: 'Design Systems',      sub: 'Design'     },
 ]
+
+// Hero cards — scattered cluster in right column
+const HERO_CARDS = [
+  {
+    id: '01', name: 'WanderFurther',     type: 'Travel Blog',    year: '2024',
+    left: 0,   top: 55,  rotate: -7, floatDuration: 3.8, enterDelay: 0.90,
+  },
+  {
+    id: '02', name: '1st-Level Support', type: 'n8n Automation', year: '2024',
+    left: 120, top: 0,   rotate:  5, floatDuration: 4.6, enterDelay: 1.05,
+  },
+  {
+    id: '03', name: 'Time Tracking',     type: 'n8n Automation', year: '2024',
+    left: 58,  top: 148, rotate: -3, floatDuration: 3.2, enterDelay: 1.20,
+  },
+] as const
 
 // ─── Hooks ───────────────────────────────────────────────────────────────────
 
@@ -353,6 +370,101 @@ function CapabilityStrip({ reveal }: { reveal: boolean }) {
   )
 }
 
+// ─── Floating Hero Cards ──────────────────────────────────────────────────────
+
+function HeroCard({
+  card,
+  index,
+  reveal,
+}: {
+  card: (typeof HERO_CARDS)[number]
+  index: number
+  reveal: boolean
+}) {
+  const mx = useMotionValue(0)
+  const my = useMotionValue(0)
+  const rotX = useSpring(useTransform(my, [-1, 1], [10, -10]), { stiffness: 380, damping: 32 })
+  const rotY = useSpring(useTransform(mx, [-1, 1], [-10, 10]), { stiffness: 380, damping: 32 })
+
+  // Two-phase: enter → then float loop
+  const [floating, setFloating] = useState(false)
+  useEffect(() => {
+    if (!reveal) return
+    const t = setTimeout(() => setFloating(true), (card.enterDelay + 0.7) * 1000)
+    return () => clearTimeout(t)
+  }, [reveal, card.enterDelay])
+
+  return (
+    <motion.div
+      className="absolute cursor-default"
+      style={{ left: card.left, top: card.top, width: 204, perspective: 900 }}
+      initial={{ opacity: 0, y: 36 }}
+      animate={
+        floating
+          ? { opacity: 1, y: [0, -16, 0], rotate: card.rotate }
+          : reveal
+          ? { opacity: 1, y: 0, rotate: card.rotate }
+          : { opacity: 0, y: 36, rotate: card.rotate }
+      }
+      transition={
+        floating
+          ? {
+              y: {
+                duration: card.floatDuration,
+                repeat: Infinity,
+                repeatType: 'mirror',
+                ease: 'easeInOut',
+                delay: index * 0.35,
+              },
+              opacity: { duration: 0 },
+              rotate: { duration: 0 },
+            }
+          : { duration: 0.75, delay: card.enterDelay, ease: [0.16, 1, 0.3, 1] }
+      }
+      onMouseMove={e => {
+        const r = e.currentTarget.getBoundingClientRect()
+        mx.set((e.clientX - (r.left + r.width  / 2)) / (r.width  / 2))
+        my.set((e.clientY - (r.top  + r.height / 2)) / (r.height / 2))
+      }}
+      onMouseLeave={() => { mx.set(0); my.set(0) }}
+    >
+      <motion.div
+        className="w-full h-[130px] rounded-2xl p-5 relative overflow-hidden"
+        style={{
+          rotateX: rotX,
+          rotateY: rotY,
+          transformStyle: 'preserve-3d',
+          background: 'linear-gradient(150deg,#100d22 0%,#0a0814 100%)',
+          border: '1px solid rgba(139,92,246,0.18)',
+          boxShadow: '0 24px 60px rgba(0,0,0,0.55), 0 1px 0 rgba(255,255,255,0.04) inset',
+        }}
+        whileHover={{
+          borderColor: 'rgba(139,92,246,0.55)',
+          boxShadow: '0 32px 80px rgba(0,0,0,0.65), 0 0 40px rgba(139,92,246,0.18), 0 1px 0 rgba(255,255,255,0.06) inset',
+        }}
+        transition={{ duration: 0.22 }}
+      >
+        {/* Number */}
+        <span className="font-mono text-[10px] text-[#1e183a] block">{card.id}</span>
+        {/* Name */}
+        <p className="text-[#c4c0e0] font-bold text-[15px] mt-2 leading-tight tracking-tight">
+          {card.name}
+        </p>
+        {/* Footer */}
+        <div className="absolute bottom-4 left-5 right-5 flex justify-between items-center">
+          <span className="font-mono text-[9px] text-[#302850]">{card.type}</span>
+          <span className="font-mono text-[9px] text-[#201c38]">{card.year}</span>
+        </div>
+        {/* Top-left specular */}
+        <div
+          className="absolute inset-0 rounded-2xl pointer-events-none"
+          style={{ background: 'linear-gradient(135deg,rgba(139,92,246,0.09) 0%,transparent 50%)' }}
+        />
+      </motion.div>
+    </motion.div>
+  )
+}
+
 // ─── Hero ─────────────────────────────────────────────────────────────────────
 
 const HEADLINE_LINES = ['I DESIGN.', 'I BUILD.', 'I SHIP.']
@@ -361,7 +473,6 @@ function HeroSection() {
   const [reveal, setReveal] = useState(false)
 
   useEffect(() => {
-    // Start revealing while curtain is mid-lift (~0.75s into 1.05s animation)
     const t = setTimeout(() => setReveal(true), 850)
     return () => clearTimeout(t)
   }, [])
@@ -369,7 +480,7 @@ function HeroSection() {
   return (
     <section className="relative h-screen overflow-hidden flex flex-col px-6 sm:px-10">
 
-      {/* Dot-grid background — pure CSS, zero JS cost */}
+      {/* Dot-grid */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
@@ -377,19 +488,15 @@ function HeroSection() {
           backgroundSize: '34px 34px',
         }}
       />
-      {/* Radial vignette — edges fade to bg colour */}
+      {/* Vignette */}
       <div
         className="absolute inset-0 pointer-events-none"
-        style={{
-          background: 'radial-gradient(ellipse 90% 80% at 50% 40%, transparent 20%, #06040e 100%)',
-        }}
+        style={{ background: 'radial-gradient(ellipse 90% 80% at 50% 40%, transparent 20%, #06040e 100%)' }}
       />
-      {/* Soft centre bloom */}
+      {/* Centre bloom — stronger on the right where cards live */}
       <div
         className="absolute inset-0 pointer-events-none"
-        style={{
-          background: 'radial-gradient(ellipse 55% 45% at 50% 38%, rgba(80,30,180,0.07) 0%, transparent 100%)',
-        }}
+        style={{ background: 'radial-gradient(ellipse 55% 70% at 72% 45%, rgba(80,30,180,0.10) 0%, transparent 100%)' }}
       />
 
       {/* Eyebrow */}
@@ -404,86 +511,69 @@ function HeroSection() {
         </motion.p>
       </div>
 
-      {/* ── Headline + right column ── */}
-      <div className="flex-1 flex flex-col justify-center">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] items-end gap-y-6 lg:gap-x-12">
+      {/* ── Two-column main area ── */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_420px] items-center gap-x-10">
 
-          {/* Three-line headline — each line clips up */}
-          <div>
-            {HEADLINE_LINES.map((line, i) => (
-              <div key={line} className="overflow-hidden">
-                <motion.div
-                  initial={{ y: '108%' }}
-                  animate={reveal ? { y: 0 } : {}}
-                  transition={{
-                    duration: 1.08,
-                    delay: 0.06 + i * 0.11,
-                    ease: [0.16, 1, 0.3, 1],
+        {/* Left: headline + CTA */}
+        <div>
+          {/* Headline */}
+          {HEADLINE_LINES.map((line, i) => (
+            <div key={line} className="overflow-hidden">
+              <motion.div
+                initial={{ y: '108%' }}
+                animate={reveal ? { y: 0 } : {}}
+                transition={{ duration: 1.08, delay: 0.06 + i * 0.11, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <span
+                  className="font-black tracking-tight block"
+                  style={{
+                    fontSize: 'clamp(48px, 8.8vw, 130px)',
+                    lineHeight: 1.0,
+                    ...(i < 2
+                      ? { color: '#e8e8e8' }
+                      : {
+                          background: 'linear-gradient(130deg,#8b5cf6 0%,#6366f1 45%,#a78bfa 100%)',
+                          WebkitBackgroundClip: 'text',
+                          WebkitTextFillColor: 'transparent',
+                          backgroundClip: 'text',
+                        }),
                   }}
                 >
-                  <span
-                    className="font-black tracking-tight block"
-                    style={{
-                      fontSize: 'clamp(50px, 10.5vw, 150px)',
-                      lineHeight: 1.0,
-                      ...(i < 2
-                        ? { color: '#e8e8e8' }
-                        : {
-                            background: 'linear-gradient(130deg,#8b5cf6 0%,#6366f1 45%,#a78bfa 100%)',
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                            backgroundClip: 'text',
-                          }),
-                    }}
-                  >
-                    {line}
-                  </span>
-                </motion.div>
-              </div>
-            ))}
-          </div>
+                  {line}
+                </span>
+              </motion.div>
+            </div>
+          ))}
 
-          {/* Right: CTA — desktop only */}
-          <div className="hidden lg:flex flex-col justify-end pb-1">
-            <motion.div
-              className="flex items-center gap-5"
-              initial={{ opacity: 0, y: 14 }}
-              animate={reveal ? { opacity: 1, y: 0 } : {}}
-              transition={{ delay: 0.52, duration: 0.75 }}
+          {/* CTA row — same on desktop + mobile */}
+          <motion.div
+            className="flex items-center gap-5 mt-8"
+            initial={{ opacity: 0, y: 14 }}
+            animate={reveal ? { opacity: 1, y: 0 } : {}}
+            transition={{ delay: 0.50, duration: 0.75 }}
+          >
+            <a
+              href="mailto:laurenz.maass@gmail.com"
+              className="inline-flex items-center gap-2.5 px-6 py-3 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-all duration-300 hover:scale-105 cursor-none shadow-[0_0_28px_rgba(139,92,246,0.40)]"
             >
-              <a
-                href="mailto:laurenz.maass@gmail.com"
-                className="inline-flex items-center gap-2.5 px-6 py-3 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-all duration-300 hover:scale-105 cursor-none shadow-[0_0_28px_rgba(139,92,246,0.40)]"
-              >
-                Get in touch
-              </a>
-              <span className="font-mono text-[10px] text-[#2a2a3a] flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
-                Open to work
-              </span>
-            </motion.div>
-          </div>
+              Get in touch
+            </a>
+            <span className="font-mono text-[10px] text-[#2a2a3a] flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+              Open to work
+            </span>
+          </motion.div>
         </div>
 
-        {/* Mobile CTA */}
-        <motion.div
-          className="lg:hidden mt-5 flex flex-wrap items-center gap-4"
-          initial={{ opacity: 0, y: 14 }}
-          animate={reveal ? { opacity: 1, y: 0 } : {}}
-          transition={{ delay: 0.42, duration: 0.72 }}
-        >
-          <a
-            href="mailto:laurenz.maass@gmail.com"
-            className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-all duration-300 cursor-none shadow-[0_0_22px_rgba(139,92,246,0.35)]"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-            Get in touch
-          </a>
-          <span className="font-mono text-[10px] text-[#2a2a3a] flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
-            Open to work
-          </span>
-        </motion.div>
+        {/* Right: floating project cards — desktop only */}
+        <div className="hidden lg:flex items-center justify-center">
+          {/* Fixed bounding box so cards don't shift the layout */}
+          <div className="relative w-[340px] h-[290px]">
+            {HERO_CARDS.map((card, i) => (
+              <HeroCard key={card.id} card={card} index={i} reveal={reveal} />
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* ── Capability drag strip ── */}
