@@ -5,7 +5,6 @@ import {
   useSpring,
   useInView,
   useMotionValue,
-  useTransform,
   AnimatePresence,
 } from 'framer-motion'
 
@@ -37,16 +36,22 @@ const PROJECTS = [
     id: '01', name: 'WanderFurther',          type: 'Travel Blog',
     desc: 'A travel blog capturing adventures, hidden spots, and stories from the road. Built to inspire fellow wanderers.',
     year: '2024', color: 'from-violet-900/30',
+    bgWord: 'BLOG',
+    cardGradient: 'linear-gradient(150deg,#1c0e42 0%,#0d0820 100%)',
   },
   {
     id: '02', name: '1st-Level Support Agent', type: 'n8n Automation',
     desc: 'Fully automated tier-1 customer support pipeline. Handles incoming queries, routes intelligently, resolves without human touch.',
     year: '2024', color: 'from-blue-900/30',
+    bgWord: 'AUTO',
+    cardGradient: 'linear-gradient(150deg,#0e1a44 0%,#080e22 100%)',
   },
   {
     id: '03', name: 'Time Tracking Tool',      type: 'n8n Automation',
     desc: 'Automated work hour tracking and reporting. Logs entries, generates summaries, keeps everything accurate.',
     year: '2024', color: 'from-purple-900/30',
+    bgWord: 'DATA',
+    cardGradient: 'linear-gradient(150deg,#200c3e 0%,#0e0820 100%)',
   },
 ]
 
@@ -70,28 +75,6 @@ const CAPABILITIES = [
   { num: '11', title: 'Workflow Automation', sub: 'Automation' },
   { num: '12', title: 'Design Systems',      sub: 'Design'     },
 ]
-
-// Hero cards — editorial cluster in right column
-const HERO_CARDS = [
-  {
-    id: '01', name: 'WanderFurther',     type: 'Travel Blog',    year: '2024',
-    bgWord: 'BLOG',
-    cardGradient: 'linear-gradient(150deg,#1c0e42 0%,#0d0820 100%)',
-    left: 0,   top: 80,  rotate: -6, floatDuration: 3.8, enterDelay: 0.90,
-  },
-  {
-    id: '02', name: '1st-Level Support', type: 'n8n Automation', year: '2024',
-    bgWord: 'AUTO',
-    cardGradient: 'linear-gradient(150deg,#0e1a44 0%,#080e22 100%)',
-    left: 152, top: 0,   rotate:  5, floatDuration: 4.6, enterDelay: 1.05,
-  },
-  {
-    id: '03', name: 'Time Tracking',     type: 'n8n Automation', year: '2024',
-    bgWord: 'DATA',
-    cardGradient: 'linear-gradient(150deg,#200c3e 0%,#0e0820 100%)',
-    left: 76,  top: 196, rotate: -3, floatDuration: 3.2, enterDelay: 1.20,
-  },
-] as const
 
 // ─── Hooks ───────────────────────────────────────────────────────────────────
 
@@ -132,6 +115,145 @@ function useFPS() {
   return fps
 }
 
+// ─── Background Canvas (aurora blobs) ────────────────────────────────────────
+
+function BackgroundCanvas() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    let W = window.innerWidth, H = window.innerHeight
+    const setSize = () => {
+      W = window.innerWidth; H = window.innerHeight
+      canvas.width = W; canvas.height = H
+    }
+    setSize()
+    window.addEventListener('resize', setSize)
+
+    // 5 blobs: fractional origin + oscillation params
+    const blobs = [
+      { fx: 0.18, fy: 0.28, r: 540, color: [72,  32, 200] as [number,number,number], phase: 0.0, speed: 0.00042, amp: 0.14 },
+      { fx: 0.74, fy: 0.20, r: 460, color: [100, 18, 225] as [number,number,number], phase: 1.3, speed: 0.00063, amp: 0.11 },
+      { fx: 0.50, fy: 0.74, r: 500, color: [148, 26, 168] as [number,number,number], phase: 2.5, speed: 0.00036, amp: 0.17 },
+      { fx: 0.10, fy: 0.80, r: 400, color: [52,  48, 215] as [number,number,number], phase: 0.8, speed: 0.00057, amp: 0.13 },
+      { fx: 0.84, fy: 0.62, r: 470, color: [118, 16, 188] as [number,number,number], phase: 3.2, speed: 0.00049, amp: 0.12 },
+    ]
+
+    // Lerped current positions
+    const pos = blobs.map(b => ({ x: b.fx * W, y: b.fy * H }))
+
+    let mouseX = W / 2, mouseY = H / 2
+    const onMove = (e: MouseEvent) => { mouseX = e.clientX; mouseY = e.clientY }
+    window.addEventListener('mousemove', onMove)
+
+    let rafId: number
+    const draw = (t: number) => {
+      ctx.clearRect(0, 0, W, H)
+
+      blobs.forEach((b, i) => {
+        // Oscillate around fractional origin
+        const tx = b.fx * W + Math.sin(t * b.speed + b.phase) * b.amp * W
+        const ty = b.fy * H + Math.cos(t * b.speed * 0.73 + b.phase + 1.1) * b.amp * H * 0.6
+
+        // Soft mouse pull (moves blobs ~8% of the distance to cursor)
+        const pullX = tx + (mouseX - b.fx * W) * 0.08
+        const pullY = ty + (mouseY - b.fy * H) * 0.08
+
+        // Lerp toward target
+        pos[i].x += (pullX - pos[i].x) * 0.025
+        pos[i].y += (pullY - pos[i].y) * 0.025
+
+        const [r, g, bl] = b.color
+        const grad = ctx.createRadialGradient(pos[i].x, pos[i].y, 0, pos[i].x, pos[i].y, b.r)
+        grad.addColorStop(0,   `rgba(${r},${g},${bl},0.13)`)
+        grad.addColorStop(0.4, `rgba(${r},${g},${bl},0.055)`)
+        grad.addColorStop(1,   `rgba(${r},${g},${bl},0)`)
+
+        ctx.beginPath()
+        ctx.arc(pos[i].x, pos[i].y, b.r, 0, Math.PI * 2)
+        ctx.fillStyle = grad
+        ctx.fill()
+      })
+
+      rafId = requestAnimationFrame(draw)
+    }
+    rafId = requestAnimationFrame(draw)
+
+    return () => {
+      window.removeEventListener('resize', setSize)
+      window.removeEventListener('mousemove', onMove)
+      cancelAnimationFrame(rafId)
+    }
+  }, [])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 pointer-events-none"
+      style={{ zIndex: 0, width: '100%', height: '100%' }}
+    />
+  )
+}
+
+// ─── Cursor ───────────────────────────────────────────────────────────────────
+
+function Cursor({ mouse }: { mouse: { x: number; y: number } }) {
+  const [isHovering, setIsHovering] = useState(false)
+
+  useEffect(() => {
+    const check = (e: MouseEvent) => {
+      const el = e.target as HTMLElement
+      const interactive =
+        !!el.closest('a, button, [role="button"], label') ||
+        el.tagName === 'INPUT' ||
+        el.tagName === 'SELECT' ||
+        el.tagName === 'TEXTAREA'
+      setIsHovering(interactive)
+    }
+    window.addEventListener('mousemove', check)
+    return () => window.removeEventListener('mousemove', check)
+  }, [])
+
+  return (
+    <>
+      {/* Dot — always visible */}
+      <motion.div
+        className="fixed top-0 left-0 rounded-full pointer-events-none"
+        style={{ width: 6, height: 6, background: '#a78bfa', zIndex: 9999, mixBlendMode: 'screen' }}
+        animate={{ x: mouse.x - 3, y: mouse.y - 3 }}
+        transition={{ type: 'spring', stiffness: 900, damping: 42, mass: 0.08 }}
+      />
+      {/* Ring — only on hover over interactive elements */}
+      <AnimatePresence>
+        {isHovering && (
+          <motion.div
+            key="cursor-ring"
+            className="fixed top-0 left-0 rounded-full pointer-events-none"
+            style={{
+              width: 32, height: 32,
+              border: '1px solid rgba(167,139,250,0.65)',
+              zIndex: 9998,
+            }}
+            initial={{ opacity: 0, scale: 0.4, x: mouse.x - 16, y: mouse.y - 16 }}
+            animate={{ opacity: 1, scale: 1, x: mouse.x - 16, y: mouse.y - 16 }}
+            exit={{ opacity: 0, scale: 0.4 }}
+            transition={{
+              x: { type: 'spring', stiffness: 200, damping: 24, mass: 0.5 },
+              y: { type: 'spring', stiffness: 200, damping: 24, mass: 0.5 },
+              opacity: { duration: 0.14 },
+              scale: { duration: 0.14 },
+            }}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  )
+}
+
 // ─── Cursor Click Effect ──────────────────────────────────────────────────────
 
 function CursorClickEffect() {
@@ -163,7 +285,6 @@ function CursorClickEffect() {
     </div>
   )
 }
-
 
 // ─── Shooting Stars ───────────────────────────────────────────────────────────
 
@@ -225,42 +346,7 @@ function ShootingStars() {
   )
 }
 
-// ─── Cursor Trail ─────────────────────────────────────────────────────────────
-
-function CursorTrail({ mouse }: { mouse: { x: number; y: number } }) {
-  const [dots, setDots] = useState<{ x: number; y: number; id: number }[]>([])
-  const nextId  = useRef(0)
-  const prevPos = useRef({ x: -500, y: -500 })
-  useEffect(() => {
-    const dx = mouse.x - prevPos.current.x, dy = mouse.y - prevPos.current.y
-    if (Math.sqrt(dx * dx + dy * dy) < 5) return
-    prevPos.current = { x: mouse.x, y: mouse.y }
-    const id = nextId.current++
-    setDots(prev => [...prev.slice(-20), { x: mouse.x, y: mouse.y, id }])
-  }, [mouse.x, mouse.y])
-  return (
-    <>
-      {dots.map((dot, i) => {
-        const size = 3 + (i / dots.length) * 7
-        return (
-          <motion.div key={dot.id} className="fixed top-0 left-0 rounded-full pointer-events-none z-[45]"
-            style={{
-              x: dot.x - size / 2, y: dot.y - size / 2,
-              width: size, height: size,
-              background: `hsl(${255 + i * 2},70%,${50 + i * 2}%)`,
-            }}
-            initial={{ opacity: 0.75, scale: 1 }}
-            animate={{ opacity: 0, scale: 0.1 }}
-            transition={{ duration: 0.65, ease: 'easeOut' }}
-          />
-        )
-      })}
-    </>
-  )
-}
-
 // ─── Misc ─────────────────────────────────────────────────────────────────────
-
 
 function Marquee({ text }: { text: string }) {
   const repeated = (text + '  ·  ').repeat(6)
@@ -364,7 +450,6 @@ function CapabilityStrip({ reveal }: { reveal: boolean }) {
             <p className="font-mono text-[10px] text-[#24203a] mt-1.5 group-hover:text-violet-500/60 transition-colors duration-200">
               {cap.sub}
             </p>
-            {/* bottom glow on hover */}
             <div
               className="absolute inset-0 rounded-2xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-300"
               style={{ background: 'radial-gradient(ellipse at 50% 130%,rgba(139,92,246,0.14) 0%,transparent 65%)' }}
@@ -376,121 +461,160 @@ function CapabilityStrip({ reveal }: { reveal: boolean }) {
   )
 }
 
-// ─── Floating Hero Cards (editorial) ─────────────────────────────────────────
+// ─── Hero Object (icosahedron) ────────────────────────────────────────────────
 
-function HeroCard({
-  card,
-  index,
-  reveal,
-}: {
-  card: (typeof HERO_CARDS)[number]
-  index: number
-  reveal: boolean
-}) {
-  const mx = useMotionValue(0)
-  const my = useMotionValue(0)
-  const rotX = useSpring(useTransform(my, [-1, 1], [8, -8]), { stiffness: 340, damping: 32 })
-  const rotY = useSpring(useTransform(mx, [-1, 1], [-8, 8]), { stiffness: 340, damping: 32 })
+function HeroObject() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const dragRef   = useRef({ dragging: false, lastX: 0, lastY: 0, velX: 0, velY: 0 })
+  const rotRef    = useRef({ x: 0.28, y: 0 })
 
-  // Two-phase: enter slide-up → then continuous idle float
-  const [floating, setFloating] = useState(false)
   useEffect(() => {
-    if (!reveal) return
-    const t = setTimeout(() => setFloating(true), (card.enterDelay + 0.72) * 1000)
-    return () => clearTimeout(t)
-  }, [reveal, card.enterDelay])
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const W = 390, H = 420
+    const dpr = Math.min(window.devicePixelRatio ?? 1, 2)
+    canvas.width  = W * dpr
+    canvas.height = H * dpr
+    ctx.scale(dpr, dpr)
+
+    // ── Icosahedron vertices (12) ──────────────────────────────────────────
+    const φ   = (1 + Math.sqrt(5)) / 2
+    const len = Math.sqrt(1 + φ * φ)
+    const rawV: [number, number, number][] = [
+      [ 0,  1,  φ], [ 0, -1,  φ], [ 0,  1, -φ], [ 0, -1, -φ],
+      [ 1,  φ,  0], [-1,  φ,  0], [ 1, -φ,  0], [-1, -φ,  0],
+      [ φ,  0,  1], [-φ,  0,  1], [ φ,  0, -1], [-φ,  0, -1],
+    ]
+    const verts = rawV.map(([x, y, z]) => [x / len, y / len, z / len] as [number, number, number])
+
+    // ── Build 30 edges by distance threshold ──────────────────────────────
+    const edgeLen = 2 / len
+    const edges: [number, number][] = []
+    for (let i = 0; i < verts.length; i++) {
+      for (let j = i + 1; j < verts.length; j++) {
+        const [ax, ay, az] = verts[i]
+        const [bx, by, bz] = verts[j]
+        const d = Math.sqrt((ax-bx)**2 + (ay-by)**2 + (az-bz)**2)
+        if (Math.abs(d - edgeLen) < 0.015) edges.push([i, j])
+      }
+    }
+
+    // ── Math helpers ──────────────────────────────────────────────────────
+    const rotX = (x: number, y: number, z: number, a: number): [number, number, number] =>
+      [x, y * Math.cos(a) - z * Math.sin(a), y * Math.sin(a) + z * Math.cos(a)]
+    const rotY = (x: number, y: number, z: number, a: number): [number, number, number] =>
+      [x * Math.cos(a) + z * Math.sin(a), y, -x * Math.sin(a) + z * Math.cos(a)]
+
+    const project = (x: number, y: number, z: number) => {
+      const fov   = 4.2
+      const scale = fov / (fov + z)
+      return { px: x * scale * 148 + W / 2, py: y * scale * 148 + H / 2, depth: z }
+    }
+
+    // ── Draw loop ─────────────────────────────────────────────────────────
+    let rafId: number
+    const draw = () => {
+      ctx.clearRect(0, 0, W, H)
+
+      const drag = dragRef.current
+      const rot  = rotRef.current
+
+      if (!drag.dragging) {
+        rot.y += 0.0038
+        rot.y += drag.velX * 0.008
+        rot.x += drag.velY * 0.008
+        drag.velX *= 0.90
+        drag.velY *= 0.90
+      }
+
+      // Clamp X rotation to avoid flipping
+      rot.x = Math.max(-0.8, Math.min(0.8, rot.x))
+
+      // Transform all vertices
+      const projected = verts.map(([vx, vy, vz]) => {
+        let [rx, ry, rz] = rotX(vx, vy, vz, rot.x)
+        ;[rx, ry, rz]    = rotY(rx, ry, rz, rot.y)
+        return project(rx, ry, rz)
+      })
+
+      // ── Draw edges ────────────────────────────────────────────────────
+      edges.forEach(([i, j]) => {
+        const a = projected[i], b = projected[j]
+        const depth   = (a.depth + b.depth) / 2
+        const opacity = 0.08 + (depth + 0.85) / 1.7 * 0.52
+        const lw      = 0.4  + (depth + 0.85) / 1.7 * 1.6
+
+        ctx.beginPath()
+        ctx.moveTo(a.px, a.py)
+        ctx.lineTo(b.px, b.py)
+        ctx.strokeStyle = `rgba(139,92,246,${Math.max(0.04, Math.min(0.62, opacity))})`
+        ctx.lineWidth   = Math.max(0.25, Math.min(2.2, lw))
+        ctx.stroke()
+      })
+
+      // ── Draw vertices ─────────────────────────────────────────────────
+      projected.forEach(v => {
+        const opacity = 0.18 + (v.depth + 0.85) / 1.7 * 0.42
+        const size    = 1.2  + (v.depth + 0.85) / 1.7 * 2.2
+
+        // Glow halo
+        const grd = ctx.createRadialGradient(v.px, v.py, 0, v.px, v.py, size * 5)
+        grd.addColorStop(0, `rgba(167,139,250,${Math.min(0.45, opacity * 0.9)})`)
+        grd.addColorStop(1, `rgba(139,92,246,0)`)
+        ctx.beginPath()
+        ctx.arc(v.px, v.py, size * 5, 0, Math.PI * 2)
+        ctx.fillStyle = grd
+        ctx.fill()
+
+        // Core
+        ctx.beginPath()
+        ctx.arc(v.px, v.py, size, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(210,190,255,${Math.min(0.92, opacity * 1.6)})`
+        ctx.fill()
+      })
+
+      rafId = requestAnimationFrame(draw)
+    }
+    rafId = requestAnimationFrame(draw)
+
+    // ── Drag / touch interaction ──────────────────────────────────────────
+    const onDown = (e: MouseEvent) => {
+      dragRef.current = { dragging: true, lastX: e.clientX, lastY: e.clientY, velX: 0, velY: 0 }
+    }
+    const onMove = (e: MouseEvent) => {
+      if (!dragRef.current.dragging) return
+      const dx = e.clientX - dragRef.current.lastX
+      const dy = e.clientY - dragRef.current.lastY
+      rotRef.current.y += dx * 0.009
+      rotRef.current.x += dy * 0.009
+      dragRef.current.velX = dx
+      dragRef.current.velY = dy
+      dragRef.current.lastX = e.clientX
+      dragRef.current.lastY = e.clientY
+    }
+    const onUp = () => { dragRef.current.dragging = false }
+
+    canvas.addEventListener('mousedown', onDown)
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+
+    return () => {
+      cancelAnimationFrame(rafId)
+      canvas.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
 
   return (
-    <motion.div
-      className="absolute cursor-default"
-      style={{ left: card.left, top: card.top, width: 218, perspective: 1000 }}
-      initial={{ opacity: 0, y: 40 }}
-      animate={
-        floating
-          ? { opacity: 1, y: [0, -14, 0], rotate: card.rotate }
-          : reveal
-          ? { opacity: 1, y: 0, rotate: card.rotate }
-          : { opacity: 0, y: 40, rotate: card.rotate }
-      }
-      transition={
-        floating
-          ? {
-              y: { duration: card.floatDuration, repeat: Infinity, repeatType: 'mirror', ease: 'easeInOut', delay: index * 0.4 },
-              opacity: { duration: 0 },
-              rotate: { duration: 0 },
-            }
-          : { duration: 0.8, delay: card.enterDelay, ease: [0.16, 1, 0.3, 1] }
-      }
-      onMouseMove={e => {
-        const r = e.currentTarget.getBoundingClientRect()
-        mx.set((e.clientX - (r.left + r.width  / 2)) / (r.width  / 2))
-        my.set((e.clientY - (r.top  + r.height / 2)) / (r.height / 2))
-      }}
-      onMouseLeave={() => { mx.set(0); my.set(0) }}
-    >
-      <motion.div
-        className="w-full h-[245px] rounded-2xl relative overflow-hidden"
-        style={{
-          rotateX: rotX,
-          rotateY: rotY,
-          transformStyle: 'preserve-3d',
-          background: card.cardGradient,
-          border: '1px solid rgba(139,92,246,0.14)',
-          boxShadow: '0 28px 70px rgba(0,0,0,0.60), 0 1px 0 rgba(255,255,255,0.04) inset',
-        }}
-        whileHover={{
-          borderColor: 'rgba(139,92,246,0.50)',
-          boxShadow: '0 36px 90px rgba(0,0,0,0.70), 0 0 50px rgba(139,92,246,0.20), 0 1px 0 rgba(255,255,255,0.07) inset',
-        }}
-        transition={{ duration: 0.22 }}
-      >
-        {/* ── Large background word — editorial label ── */}
-        <span
-          className="absolute select-none pointer-events-none font-black leading-none"
-          style={{
-            fontSize: 96,
-            bottom: -8,
-            right: -4,
-            color: 'rgba(255,255,255,0.045)',
-            letterSpacing: '-0.04em',
-            lineHeight: 1,
-          }}
-        >
-          {card.bgWord}
-        </span>
-
-        {/* ── Content layer ── */}
-        <div className="absolute inset-0 p-5 flex flex-col justify-between">
-          {/* Top row: index + type tag */}
-          <div className="flex items-start justify-between">
-            <span className="font-mono text-[10px] text-[#28204a]">{card.id}</span>
-            <span
-              className="font-mono text-[9px] px-2 py-0.5 rounded-full"
-              style={{ color: 'rgba(139,92,246,0.35)', border: '1px solid rgba(139,92,246,0.14)' }}
-            >
-              {card.type}
-            </span>
-          </div>
-
-          {/* Bottom: title + year */}
-          <div>
-            <p
-              className="font-black leading-tight tracking-tight mb-2"
-              style={{ fontSize: 19, color: '#c0bada' }}
-            >
-              {card.name}
-            </p>
-            <span className="font-mono text-[9px] text-[#2e2848]">{card.year}</span>
-          </div>
-        </div>
-
-        {/* Top-left specular highlight */}
-        <div
-          className="absolute inset-0 rounded-2xl pointer-events-none"
-          style={{ background: 'linear-gradient(145deg,rgba(139,92,246,0.08) 0%,transparent 45%)' }}
-        />
-      </motion.div>
-    </motion.div>
+    <canvas
+      ref={canvasRef}
+      style={{ width: 390, height: 420 }}
+      className="select-none"
+    />
   )
 }
 
@@ -522,10 +646,10 @@ function HeroSection() {
         className="absolute inset-0 pointer-events-none"
         style={{ background: 'radial-gradient(ellipse 90% 80% at 50% 40%, transparent 20%, #06040e 100%)' }}
       />
-      {/* Centre bloom — stronger on the right where cards live */}
+      {/* Centre bloom — right side for the object */}
       <div
         className="absolute inset-0 pointer-events-none"
-        style={{ background: 'radial-gradient(ellipse 55% 70% at 72% 45%, rgba(80,30,180,0.10) 0%, transparent 100%)' }}
+        style={{ background: 'radial-gradient(ellipse 55% 70% at 72% 45%, rgba(80,30,180,0.09) 0%, transparent 100%)' }}
       />
 
       {/* Eyebrow */}
@@ -545,7 +669,6 @@ function HeroSection() {
 
         {/* Left: headline + CTA */}
         <div>
-          {/* Headline */}
           {HEADLINE_LINES.map((line, i) => (
             <div key={line} className="overflow-hidden">
               <motion.div
@@ -574,7 +697,7 @@ function HeroSection() {
             </div>
           ))}
 
-          {/* CTA row — same on desktop + mobile */}
+          {/* CTA row */}
           <motion.div
             className="flex items-center gap-5 mt-8"
             initial={{ opacity: 0, y: 14 }}
@@ -594,14 +717,15 @@ function HeroSection() {
           </motion.div>
         </div>
 
-        {/* Right: editorial floating cards — desktop only */}
-        <div className="hidden lg:flex items-center justify-center">
-          <div className="relative w-[390px] h-[450px]">
-            {HERO_CARDS.map((card, i) => (
-              <HeroCard key={card.id} card={card} index={i} reveal={reveal} />
-            ))}
-          </div>
-        </div>
+        {/* Right: interactive 3D wireframe object — desktop only */}
+        <motion.div
+          className="hidden lg:flex items-center justify-center"
+          initial={{ opacity: 0 }}
+          animate={reveal ? { opacity: 1 } : {}}
+          transition={{ delay: 0.6, duration: 1.1 }}
+        >
+          <HeroObject />
+        </motion.div>
       </div>
 
       {/* ── Capability drag strip ── */}
@@ -725,28 +849,71 @@ function ProjectsSection() {
       <motion.div initial={{ opacity: 0, y: 10 }} animate={inView ? { opacity: 1, y: 0 } : {}} transition={{ duration: 0.5 }} className="mb-12">
         <span className="font-mono text-[11px] text-violet-500/60 tracking-[0.3em] uppercase">Work</span>
       </motion.div>
-      <div>
+      <div className="flex flex-col gap-5">
         {PROJECTS.map((project, i) => (
-          <motion.div key={project.id} className="relative group overflow-hidden border-b border-[#0f0f0f] last:border-b-0"
-            initial={{ opacity: 0, y: 40 }} animate={inView ? { opacity: 1, y: 0 } : {}}
-            transition={{ delay: i * 0.12, duration: 0.75, ease: [0.16, 1, 0.3, 1] }}>
-            <motion.div className={`absolute inset-0 bg-gradient-to-r ${project.color} to-transparent pointer-events-none`}
-              initial={{ opacity: 0, x: -60 }} whileHover={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }} />
-            <div className="relative py-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6 cursor-default">
+          <motion.div
+            key={project.id}
+            className="relative rounded-2xl overflow-hidden group"
+            style={{
+              background: project.cardGradient,
+              border: '1px solid rgba(139,92,246,0.10)',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.40)',
+            }}
+            initial={{ opacity: 0, y: 40 }}
+            animate={inView ? { opacity: 1, y: 0 } : {}}
+            transition={{ delay: i * 0.12, duration: 0.75, ease: [0.16, 1, 0.3, 1] }}
+            whileHover={{
+              borderColor: 'rgba(139,92,246,0.38)',
+              boxShadow: '0 32px 80px rgba(0,0,0,0.55), 0 0 50px rgba(139,92,246,0.12)',
+            }}
+          >
+            {/* Background word */}
+            <span
+              className="absolute select-none pointer-events-none font-black leading-none"
+              style={{
+                fontSize: 'clamp(90px, 14vw, 160px)',
+                bottom: -12,
+                right: -6,
+                color: 'rgba(255,255,255,0.03)',
+                letterSpacing: '-0.04em',
+                lineHeight: 1,
+              }}
+            >
+              {project.bgWord}
+            </span>
+
+            {/* Specular top-left */}
+            <div
+              className="absolute inset-0 rounded-2xl pointer-events-none"
+              style={{ background: 'linear-gradient(145deg,rgba(139,92,246,0.07) 0%,transparent 40%)' }}
+            />
+
+            <div className="relative p-8 sm:p-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
               <div className="flex items-start gap-6">
-                <span className="font-mono text-[11px] text-[#222] group-hover:text-violet-500/50 transition-colors pt-1 flex-shrink-0">{project.id}</span>
+                <span className="font-mono text-[11px] text-[#28204a] pt-1 flex-shrink-0">{project.id}</span>
                 <div>
                   <div className="flex flex-wrap items-baseline gap-4 mb-3">
-                    <h3 className="text-2xl sm:text-3xl font-black text-[#aaa] group-hover:text-white transition-colors duration-300 tracking-tight">{project.name}</h3>
-                    <span className="font-mono text-[10px] text-[#252525] border border-[#181818] px-2.5 py-1 rounded-full group-hover:border-violet-500/30 group-hover:text-violet-400/70 transition-all duration-300">{project.type}</span>
+                    <h3 className="text-2xl sm:text-3xl font-black text-[#c0bada] tracking-tight group-hover:text-white transition-colors duration-300">
+                      {project.name}
+                    </h3>
+                    <span
+                      className="font-mono text-[9px] px-2.5 py-1 rounded-full"
+                      style={{ color: 'rgba(139,92,246,0.55)', border: '1px solid rgba(139,92,246,0.18)' }}
+                    >
+                      {project.type}
+                    </span>
                   </div>
-                  <p className="text-sm text-[#333] leading-relaxed group-hover:text-[#666] transition-colors duration-300 max-w-xl">{project.desc}</p>
+                  <p className="text-sm text-[#3e3260] leading-relaxed max-w-xl group-hover:text-[#6a5a9a] transition-colors duration-300">
+                    {project.desc}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-3 flex-shrink-0 pl-10 sm:pl-0">
-                <span className="font-mono text-[11px] text-[#222] group-hover:text-[#444] transition-colors">{project.year}</span>
-                <motion.span className="text-lg text-[#1c1c1c] group-hover:text-violet-400 transition-colors duration-300" whileHover={{ x: 4, y: -4 }}>↗</motion.span>
+                <span className="font-mono text-[11px] text-[#2e2848] group-hover:text-[#5a4878] transition-colors">{project.year}</span>
+                <motion.span
+                  className="text-lg text-[#2a2248] group-hover:text-violet-400 transition-colors duration-300"
+                  whileHover={{ x: 4, y: -4 }}
+                >↗</motion.span>
               </div>
             </div>
           </motion.div>
@@ -810,33 +977,6 @@ export default function App() {
     return () => clearTimeout(t)
   }, [])
 
-  // ── Cursor spotlight — lerp CSS vars, body gradient follows mouse ─────────
-  useEffect(() => {
-    let tx = 50, ty = 50   // target (mouse position as %)
-    let cx = 50, cy = 50   // current (lerped)
-    let rafId: number
-
-    const onMove = (e: MouseEvent) => {
-      tx = (e.clientX / window.innerWidth)  * 100
-      ty = (e.clientY / window.innerHeight) * 100
-    }
-
-    const tick = () => {
-      cx += (tx - cx) * 0.055   // lag factor — lower = more lag
-      cy += (ty - cy) * 0.055
-      document.documentElement.style.setProperty('--sx', `${cx.toFixed(2)}%`)
-      document.documentElement.style.setProperty('--sy', `${cy.toFixed(2)}%`)
-      rafId = requestAnimationFrame(tick)
-    }
-
-    document.addEventListener('mousemove', onMove)
-    rafId = requestAnimationFrame(tick)
-    return () => {
-      document.removeEventListener('mousemove', onMove)
-      cancelAnimationFrame(rafId)
-    }
-  }, [])
-
   // ── Easter eggs ──────────────────────────────────────────────────────────
   const logoClicksRef             = useRef(0)
   const [egg1Msg, setEgg1Msg]     = useState(false)
@@ -863,6 +1003,9 @@ export default function App() {
   return (
     <div className="text-[#e8e8e8] min-h-screen font-sans antialiased cursor-none overflow-x-hidden">
 
+      {/* Aurora background */}
+      <BackgroundCanvas />
+
       {/* Scroll progress */}
       <motion.div style={{ scaleX }} className="fixed top-0 left-0 right-0 h-[2px] bg-violet-500 origin-left z-50" />
 
@@ -886,7 +1029,6 @@ export default function App() {
             >
               LM
             </motion.span>
-            {/* Loading bar */}
             <div className="w-28 h-px bg-[#111] overflow-hidden relative rounded-full">
               <motion.div
                 className="absolute inset-y-0 left-0 rounded-full"
@@ -901,8 +1043,8 @@ export default function App() {
       </AnimatePresence>
 
       <ShootingStars />
-      <CursorTrail mouse={mouse} />
       <CursorClickEffect />
+      <Cursor mouse={mouse} />
 
       {/* Screen flash */}
       <AnimatePresence>
@@ -940,22 +1082,6 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Custom cursor */}
-      <motion.div
-        className="fixed top-0 left-0 w-3 h-3 rounded-full bg-violet-400 pointer-events-none z-50 mix-blend-screen"
-        animate={{ x: mouse.x - 6, y: mouse.y - 6 }}
-        transition={{ type: 'spring', stiffness: 700, damping: 30, mass: 0.12 }}
-      />
-      <motion.div
-        className="fixed top-0 left-0 rounded-full pointer-events-none z-50"
-        animate={{ x: mouse.x - 20, y: mouse.y - 20 }}
-        style={{ width: 40, height: 40, border: '1px solid rgba(139,92,246,0.25)' }}
-        transition={{
-          x: { type: 'spring', stiffness: 180, damping: 22, mass: 0.6 },
-          y: { type: 'spring', stiffness: 180, damping: 22, mass: 0.6 },
-        }}
-      />
 
       {/* Nav */}
       <nav className="fixed top-0 left-0 right-0 z-40 flex justify-between items-center px-6 sm:px-10 py-5">
