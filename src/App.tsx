@@ -150,8 +150,8 @@ function buildParticles(w: number, h: number): Particle[] {
       sx, sy, sz,
       x: px, y: py, vx: 0, vy: 0,
       ox: px, oy: py,
-      size: 0.9 + Math.random() * 2.4,
-      baseAlpha: 0.35 + Math.random() * 0.65,
+      size: 1.1 + Math.random() * 2.6,
+      baseAlpha: 0.55 + Math.random() * 0.45,
       hue: 248 + Math.random() * 45,
       pulseSpeed: 0.5 + Math.random() * 1.5,
       pulseOffset: Math.random() * Math.PI * 2,
@@ -307,7 +307,7 @@ function ParticleField({
           const dist = Math.sqrt(dx * dx + dy * dy)
           if (dist < CONNECTION_DIST) {
             const minDepth = Math.min(depthAlpha(ps[i]), depthAlpha(ps[j]))
-            const op = (1 - dist / CONNECTION_DIST) * 0.2 * minDepth
+            const op = (1 - dist / CONNECTION_DIST) * 0.32 * minDepth
             ctx.strokeStyle = `rgba(139,92,246,${op})`
             ctx.beginPath()
             ctx.moveTo(ps[i].x, ps[i].y)
@@ -325,9 +325,9 @@ function ParticleField({
           const dist = Math.sqrt(dx * dx + dy * dy)
           if (dist < MOUSE_LINE_DIST) {
             const t  = 1 - dist / MOUSE_LINE_DIST
-            const op = t * t * 0.75 * depthAlpha(p)
-            ctx.lineWidth   = 0.6 + t * 1.2
-            ctx.strokeStyle = `rgba(192,160,255,${op})`
+            const op = t * t * 0.95 * depthAlpha(p)
+            ctx.lineWidth   = 0.6 + t * 1.6
+            ctx.strokeStyle = `rgba(210,185,255,${op})`
             ctx.beginPath()
             ctx.moveTo(mx, my)
             ctx.lineTo(p.x, p.y)
@@ -369,12 +369,15 @@ function ParticleField({
         ctx.lineWidth = 0.75
         ctx.stroke()
 
-        // Core with glow
-        ctx.shadowColor = `hsla(${h},80%,72%,0.9)`
-        ctx.shadowBlur  = p.size * 3 * glowMul
+        // Core with glow — extra bloom when cursor is near
+        const mdx = p.x - mx, mdy = p.y - my
+        const mouseDist = Math.sqrt(mdx * mdx + mdy * mdy)
+        const mouseBloom = mouseDist < 140 ? Math.pow(1 - mouseDist / 140, 1.4) * 18 : 0
+        ctx.shadowColor = `hsla(${h},85%,75%,0.95)`
+        ctx.shadowBlur  = (p.size * 5 + mouseBloom) * glowMul
         ctx.beginPath()
-        ctx.arc(p.x, p.y, p.size * 0.48, 0, Math.PI * 2)
-        ctx.fillStyle = `hsla(${h},78%,82%,${a})`
+        ctx.arc(p.x, p.y, p.size * 0.55, 0, Math.PI * 2)
+        ctx.fillStyle = `hsla(${h},80%,88%,${a})`
         ctx.fill()
         ctx.shadowBlur = 0
       }
@@ -897,7 +900,7 @@ export default function App() {
   }
 
   return (
-    <div className="bg-[#000] text-[#e8e8e8] min-h-screen font-sans antialiased cursor-none overflow-x-hidden">
+    <div className="bg-[#06040e] text-[#e8e8e8] min-h-screen font-sans antialiased cursor-none overflow-x-hidden">
 
       <motion.div style={{ scaleX }} className="fixed top-0 left-0 right-0 h-[2px] bg-violet-500 origin-left z-50" />
 
@@ -1026,9 +1029,13 @@ export default function App() {
       >
         <ParticleField actionsRef={actionsRef} globeRef={globeRef} />
 
+        {/* Ambient glow — gives the void some depth */}
+        <div className="absolute inset-0 pointer-events-none"
+          style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 48%, rgba(88,28,220,0.07) 0%, rgba(60,10,160,0.04) 45%, transparent 100%)' }} />
+
         {/* Vignette */}
         <div className="absolute inset-0 pointer-events-none"
-          style={{ background: 'radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.8) 100%)' }} />
+          style={{ background: 'radial-gradient(ellipse at center, transparent 50%, rgba(6,4,14,0.85) 100%)' }} />
 
         {/* Name + CTA — bottom-left */}
         <div className="absolute bottom-12 left-6 sm:left-10 z-10">
