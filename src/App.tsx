@@ -71,19 +71,25 @@ const CAPABILITIES = [
   { num: '12', title: 'Design Systems',      sub: 'Design'     },
 ]
 
-// Hero cards — scattered cluster in right column
+// Hero cards — editorial cluster in right column
 const HERO_CARDS = [
   {
     id: '01', name: 'WanderFurther',     type: 'Travel Blog',    year: '2024',
-    left: 0,   top: 55,  rotate: -7, floatDuration: 3.8, enterDelay: 0.90,
+    bgWord: 'BLOG',
+    cardGradient: 'linear-gradient(150deg,#1c0e42 0%,#0d0820 100%)',
+    left: 0,   top: 80,  rotate: -6, floatDuration: 3.8, enterDelay: 0.90,
   },
   {
     id: '02', name: '1st-Level Support', type: 'n8n Automation', year: '2024',
-    left: 120, top: 0,   rotate:  5, floatDuration: 4.6, enterDelay: 1.05,
+    bgWord: 'AUTO',
+    cardGradient: 'linear-gradient(150deg,#0e1a44 0%,#080e22 100%)',
+    left: 152, top: 0,   rotate:  5, floatDuration: 4.6, enterDelay: 1.05,
   },
   {
     id: '03', name: 'Time Tracking',     type: 'n8n Automation', year: '2024',
-    left: 58,  top: 148, rotate: -3, floatDuration: 3.2, enterDelay: 1.20,
+    bgWord: 'DATA',
+    cardGradient: 'linear-gradient(150deg,#200c3e 0%,#0e0820 100%)',
+    left: 76,  top: 196, rotate: -3, floatDuration: 3.2, enterDelay: 1.20,
   },
 ] as const
 
@@ -370,7 +376,7 @@ function CapabilityStrip({ reveal }: { reveal: boolean }) {
   )
 }
 
-// ─── Floating Hero Cards ──────────────────────────────────────────────────────
+// ─── Floating Hero Cards (editorial) ─────────────────────────────────────────
 
 function HeroCard({
   card,
@@ -383,43 +389,37 @@ function HeroCard({
 }) {
   const mx = useMotionValue(0)
   const my = useMotionValue(0)
-  const rotX = useSpring(useTransform(my, [-1, 1], [10, -10]), { stiffness: 380, damping: 32 })
-  const rotY = useSpring(useTransform(mx, [-1, 1], [-10, 10]), { stiffness: 380, damping: 32 })
+  const rotX = useSpring(useTransform(my, [-1, 1], [8, -8]), { stiffness: 340, damping: 32 })
+  const rotY = useSpring(useTransform(mx, [-1, 1], [-8, 8]), { stiffness: 340, damping: 32 })
 
-  // Two-phase: enter → then float loop
+  // Two-phase: enter slide-up → then continuous idle float
   const [floating, setFloating] = useState(false)
   useEffect(() => {
     if (!reveal) return
-    const t = setTimeout(() => setFloating(true), (card.enterDelay + 0.7) * 1000)
+    const t = setTimeout(() => setFloating(true), (card.enterDelay + 0.72) * 1000)
     return () => clearTimeout(t)
   }, [reveal, card.enterDelay])
 
   return (
     <motion.div
       className="absolute cursor-default"
-      style={{ left: card.left, top: card.top, width: 204, perspective: 900 }}
-      initial={{ opacity: 0, y: 36 }}
+      style={{ left: card.left, top: card.top, width: 218, perspective: 1000 }}
+      initial={{ opacity: 0, y: 40 }}
       animate={
         floating
-          ? { opacity: 1, y: [0, -16, 0], rotate: card.rotate }
+          ? { opacity: 1, y: [0, -14, 0], rotate: card.rotate }
           : reveal
           ? { opacity: 1, y: 0, rotate: card.rotate }
-          : { opacity: 0, y: 36, rotate: card.rotate }
+          : { opacity: 0, y: 40, rotate: card.rotate }
       }
       transition={
         floating
           ? {
-              y: {
-                duration: card.floatDuration,
-                repeat: Infinity,
-                repeatType: 'mirror',
-                ease: 'easeInOut',
-                delay: index * 0.35,
-              },
+              y: { duration: card.floatDuration, repeat: Infinity, repeatType: 'mirror', ease: 'easeInOut', delay: index * 0.4 },
               opacity: { duration: 0 },
               rotate: { duration: 0 },
             }
-          : { duration: 0.75, delay: card.enterDelay, ease: [0.16, 1, 0.3, 1] }
+          : { duration: 0.8, delay: card.enterDelay, ease: [0.16, 1, 0.3, 1] }
       }
       onMouseMove={e => {
         const r = e.currentTarget.getBoundingClientRect()
@@ -429,36 +429,65 @@ function HeroCard({
       onMouseLeave={() => { mx.set(0); my.set(0) }}
     >
       <motion.div
-        className="w-full h-[130px] rounded-2xl p-5 relative overflow-hidden"
+        className="w-full h-[245px] rounded-2xl relative overflow-hidden"
         style={{
           rotateX: rotX,
           rotateY: rotY,
           transformStyle: 'preserve-3d',
-          background: 'linear-gradient(150deg,#100d22 0%,#0a0814 100%)',
-          border: '1px solid rgba(139,92,246,0.18)',
-          boxShadow: '0 24px 60px rgba(0,0,0,0.55), 0 1px 0 rgba(255,255,255,0.04) inset',
+          background: card.cardGradient,
+          border: '1px solid rgba(139,92,246,0.14)',
+          boxShadow: '0 28px 70px rgba(0,0,0,0.60), 0 1px 0 rgba(255,255,255,0.04) inset',
         }}
         whileHover={{
-          borderColor: 'rgba(139,92,246,0.55)',
-          boxShadow: '0 32px 80px rgba(0,0,0,0.65), 0 0 40px rgba(139,92,246,0.18), 0 1px 0 rgba(255,255,255,0.06) inset',
+          borderColor: 'rgba(139,92,246,0.50)',
+          boxShadow: '0 36px 90px rgba(0,0,0,0.70), 0 0 50px rgba(139,92,246,0.20), 0 1px 0 rgba(255,255,255,0.07) inset',
         }}
         transition={{ duration: 0.22 }}
       >
-        {/* Number */}
-        <span className="font-mono text-[10px] text-[#1e183a] block">{card.id}</span>
-        {/* Name */}
-        <p className="text-[#c4c0e0] font-bold text-[15px] mt-2 leading-tight tracking-tight">
-          {card.name}
-        </p>
-        {/* Footer */}
-        <div className="absolute bottom-4 left-5 right-5 flex justify-between items-center">
-          <span className="font-mono text-[9px] text-[#302850]">{card.type}</span>
-          <span className="font-mono text-[9px] text-[#201c38]">{card.year}</span>
+        {/* ── Large background word — editorial label ── */}
+        <span
+          className="absolute select-none pointer-events-none font-black leading-none"
+          style={{
+            fontSize: 96,
+            bottom: -8,
+            right: -4,
+            color: 'rgba(255,255,255,0.045)',
+            letterSpacing: '-0.04em',
+            lineHeight: 1,
+          }}
+        >
+          {card.bgWord}
+        </span>
+
+        {/* ── Content layer ── */}
+        <div className="absolute inset-0 p-5 flex flex-col justify-between">
+          {/* Top row: index + type tag */}
+          <div className="flex items-start justify-between">
+            <span className="font-mono text-[10px] text-[#28204a]">{card.id}</span>
+            <span
+              className="font-mono text-[9px] px-2 py-0.5 rounded-full"
+              style={{ color: 'rgba(139,92,246,0.35)', border: '1px solid rgba(139,92,246,0.14)' }}
+            >
+              {card.type}
+            </span>
+          </div>
+
+          {/* Bottom: title + year */}
+          <div>
+            <p
+              className="font-black leading-tight tracking-tight mb-2"
+              style={{ fontSize: 19, color: '#c0bada' }}
+            >
+              {card.name}
+            </p>
+            <span className="font-mono text-[9px] text-[#2e2848]">{card.year}</span>
+          </div>
         </div>
-        {/* Top-left specular */}
+
+        {/* Top-left specular highlight */}
         <div
           className="absolute inset-0 rounded-2xl pointer-events-none"
-          style={{ background: 'linear-gradient(135deg,rgba(139,92,246,0.09) 0%,transparent 50%)' }}
+          style={{ background: 'linear-gradient(145deg,rgba(139,92,246,0.08) 0%,transparent 45%)' }}
         />
       </motion.div>
     </motion.div>
@@ -565,10 +594,9 @@ function HeroSection() {
           </motion.div>
         </div>
 
-        {/* Right: floating project cards — desktop only */}
+        {/* Right: editorial floating cards — desktop only */}
         <div className="hidden lg:flex items-center justify-center">
-          {/* Fixed bounding box so cards don't shift the layout */}
-          <div className="relative w-[340px] h-[290px]">
+          <div className="relative w-[390px] h-[450px]">
             {HERO_CARDS.map((card, i) => (
               <HeroCard key={card.id} card={card} index={i} reveal={reveal} />
             ))}
@@ -782,6 +810,33 @@ export default function App() {
     return () => clearTimeout(t)
   }, [])
 
+  // ── Cursor spotlight — lerp CSS vars, body gradient follows mouse ─────────
+  useEffect(() => {
+    let tx = 50, ty = 50   // target (mouse position as %)
+    let cx = 50, cy = 50   // current (lerped)
+    let rafId: number
+
+    const onMove = (e: MouseEvent) => {
+      tx = (e.clientX / window.innerWidth)  * 100
+      ty = (e.clientY / window.innerHeight) * 100
+    }
+
+    const tick = () => {
+      cx += (tx - cx) * 0.055   // lag factor — lower = more lag
+      cy += (ty - cy) * 0.055
+      document.documentElement.style.setProperty('--sx', `${cx.toFixed(2)}%`)
+      document.documentElement.style.setProperty('--sy', `${cy.toFixed(2)}%`)
+      rafId = requestAnimationFrame(tick)
+    }
+
+    document.addEventListener('mousemove', onMove)
+    rafId = requestAnimationFrame(tick)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      cancelAnimationFrame(rafId)
+    }
+  }, [])
+
   // ── Easter eggs ──────────────────────────────────────────────────────────
   const logoClicksRef             = useRef(0)
   const [egg1Msg, setEgg1Msg]     = useState(false)
@@ -806,7 +861,7 @@ export default function App() {
   }, [rainbowOn])
 
   return (
-    <div className="bg-[#06040e] text-[#e8e8e8] min-h-screen font-sans antialiased cursor-none overflow-x-hidden">
+    <div className="text-[#e8e8e8] min-h-screen font-sans antialiased cursor-none overflow-x-hidden">
 
       {/* Scroll progress */}
       <motion.div style={{ scaleX }} className="fixed top-0 left-0 right-0 h-[2px] bg-violet-500 origin-left z-50" />

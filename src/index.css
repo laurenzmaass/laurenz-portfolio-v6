@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Cursor spotlight — updated each frame by the lerp loop in App */
+:root {
+  --sx: 50%;
+  --sy: 50%;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -12,7 +18,22 @@ html {
 
 body {
   margin: 0;
-  background: #06040e;
+  /*
+   * Two-layer background:
+   *   1. Subtle violet spotlight that tracks the cursor (~550px radius, 11% opacity)
+   *   2. Base dark colour
+   * The spotlight layer updates via --sx / --sy CSS vars set by a rAF lerp loop.
+   * CSS can't transition custom-property gradients, so the lerp in JS provides
+   * the smooth follow instead.
+   */
+  background:
+    radial-gradient(
+      550px circle at var(--sx) var(--sy),
+      rgba(72, 32, 200, 0.11) 0%,
+      rgba(40, 16, 110, 0.05) 40%,
+      transparent 70%
+    ),
+    #06040e;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
