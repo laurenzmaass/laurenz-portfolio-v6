@@ -443,30 +443,18 @@ function HeroSection() {
             ))}
           </div>
 
-          {/* Right: description + CTA — desktop only */}
-          <div className="hidden lg:flex flex-col justify-end gap-6 pb-1">
-            <motion.p
-              className="text-sm text-[#3d3d50] leading-relaxed"
-              initial={{ opacity: 0, y: 18 }}
-              animate={reveal ? { opacity: 1, y: 0 } : {}}
-              transition={{ delay: 0.48, duration: 0.85, ease: [0.16, 1, 0.3, 1] }}
-            >
-              React &amp; TypeScript on the frontend.<br />
-              n8n &amp; Make for automation.<br />
-              Finishing studies in Berlin —<br />
-              actively looking for full-time roles.
-            </motion.p>
+          {/* Right: CTA — desktop only */}
+          <div className="hidden lg:flex flex-col justify-end pb-1">
             <motion.div
-              className="flex items-center gap-4"
+              className="flex items-center gap-5"
               initial={{ opacity: 0, y: 14 }}
               animate={reveal ? { opacity: 1, y: 0 } : {}}
-              transition={{ delay: 0.60, duration: 0.75 }}
+              transition={{ delay: 0.52, duration: 0.75 }}
             >
               <a
                 href="mailto:laurenz.maass@gmail.com"
-                className="inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition-all duration-300 hover:scale-105 cursor-none shadow-[0_0_22px_rgba(139,92,246,0.35)]"
+                className="inline-flex items-center gap-2.5 px-6 py-3 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium transition-all duration-300 hover:scale-105 cursor-none shadow-[0_0_28px_rgba(139,92,246,0.40)]"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                 Get in touch
               </a>
               <span className="font-mono text-[10px] text-[#2a2a3a] flex items-center gap-2">
