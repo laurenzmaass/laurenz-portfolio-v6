@@ -8,7 +8,7 @@ import {
   AnimatePresence,
 } from 'framer-motion'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { MeshDistortMaterial, Environment } from '@react-three/drei'
+import { MeshDistortMaterial } from '@react-three/drei'
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
 
@@ -539,11 +539,11 @@ function BlobMesh() {
       <MeshDistortMaterial
         ref={matRef}
         color="#d0d0d8"
-        metalness={0.95}
-        roughness={0.06}
+        metalness={0.88}
+        roughness={0.14}
         distort={0.40}
         speed={1.8}
-        envMapIntensity={2.0}
+        envMapIntensity={0}
         emissive="#000000"
         emissiveIntensity={1}
       />
@@ -553,29 +553,98 @@ function BlobMesh() {
 
 function HeroObject() {
   return (
-    <div style={{ width: 420, height: 440 }} className="select-none">
+    <div style={{ width: 560, height: 560, marginRight: -32 }} className="select-none">
       <Canvas
         camera={{ position: [0, 0, 2.8], fov: 45 }}
         dpr={[1, 2]}
         gl={{ antialias: true, alpha: true }}
         style={{ background: 'transparent' }}
+        onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
       >
         <Suspense fallback={null}>
-          {/* Lighting */}
-          <ambientLight intensity={0.12} />
-          <directionalLight position={[5, 5, 5]}   intensity={1.0} color="#ffffff" />
-          <directionalLight position={[-4, -2, -4]} intensity={0.3} color="#a78bfa" />
-          <pointLight       position={[0, 4, 2]}    intensity={0.6} color="#ffffff" />
-          {/* Studio HDR env for chrome-like reflections */}
-          <Environment preset="studio" />
+          {/* Abstract colored point lighting — no HDR env */}
+          <ambientLight intensity={0.06} />
+          <pointLight position={[4,   3,  4]} intensity={2.8} color="#ffffff" />
+          <pointLight position={[-5,  2, -3]} intensity={2.2} color="#a78bfa" />
+          <pointLight position={[0,  -5,  2]} intensity={1.4} color="#818cf8" />
+          <pointLight position={[3,   5, -2]} intensity={1.0} color="#e0e0ff" />
+          <pointLight position={[-3, -2,  5]} intensity={0.9} color="#c4b5fd" />
           <BlobMesh />
           <EffectComposer>
             <Bloom
-              luminanceThreshold={0.55}
+              luminanceThreshold={0.50}
               luminanceSmoothing={0.85}
-              intensity={1.1}
+              intensity={1.3}
               mipmapBlur
             />
+          </EffectComposer>
+        </Suspense>
+      </Canvas>
+    </div>
+  )
+}
+
+// ─── Decorative Blob ──────────────────────────────────────────────────────────
+
+function DecorativeBlobMesh({ color }: { color: string }) {
+  const meshRef = useRef<THREE.Mesh>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const matRef  = useRef<any>(null)
+
+  useFrame((_, delta) => {
+    if (!meshRef.current) return
+    meshRef.current.rotation.y += delta * 0.15
+    meshRef.current.rotation.x += delta * 0.09
+  })
+
+  return (
+    <mesh ref={meshRef}>
+      <sphereGeometry args={[1, 64, 64]} />
+      <MeshDistortMaterial
+        ref={matRef}
+        color={color}
+        metalness={0.82}
+        roughness={0.20}
+        distort={0.48}
+        speed={1.3}
+        envMapIntensity={0}
+        transparent
+        opacity={0.70}
+      />
+    </mesh>
+  )
+}
+
+function DecorativeBlob({
+  size = 200,
+  color = '#6366f1',
+  className = '',
+  style,
+}: {
+  size?: number
+  color?: string
+  className?: string
+  style?: React.CSSProperties
+}) {
+  return (
+    <div
+      className={`pointer-events-none select-none ${className}`}
+      style={{ width: size, height: size, ...style }}
+    >
+      <Canvas
+        camera={{ position: [0, 0, 2.8], fov: 45 }}
+        dpr={[1, 2]}
+        gl={{ antialias: true, alpha: true }}
+        onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
+      >
+        <Suspense fallback={null}>
+          <ambientLight intensity={0.05} />
+          <pointLight position={[3,  3,  3]} intensity={2.2} color="#ffffff" />
+          <pointLight position={[-3, -2, 2]} intensity={1.6} color={color} />
+          <pointLight position={[0,  4, -2]} intensity={1.0} color="#e0e8ff" />
+          <DecorativeBlobMesh color={color} />
+          <EffectComposer>
+            <Bloom luminanceThreshold={0.45} intensity={0.9} mipmapBlur />
           </EffectComposer>
         </Suspense>
       </Canvas>
@@ -596,7 +665,7 @@ function HeroSection() {
   }, [])
 
   return (
-    <section className="relative h-screen overflow-hidden flex flex-col px-6 sm:px-10">
+    <section className="relative h-screen flex flex-col px-6 sm:px-10" style={{ overflow: 'visible' }}>
 
       {/* Dot-grid */}
       <div
@@ -630,7 +699,7 @@ function HeroSection() {
       </div>
 
       {/* ── Two-column main area ── */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_420px] items-center gap-x-10">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_560px] items-center gap-x-10">
 
         {/* Left: headline + CTA */}
         <div>
@@ -732,7 +801,10 @@ function AboutSection() {
   const ref = useRef(null)
   const inView = useInView(ref, { once: true, margin: '-8% 0px' })
   return (
-    <section ref={ref} className="px-6 sm:px-10 py-32 overflow-hidden">
+    <section ref={ref} className="px-6 sm:px-10 py-32 overflow-hidden relative">
+      <div className="absolute -top-16 -right-16 opacity-50 pointer-events-none">
+        <DecorativeBlob size={260} color="#6366f1" />
+      </div>
       <motion.div initial={{ opacity: 0, y: 10 }} animate={inView ? { opacity: 1, y: 0 } : {}} transition={{ duration: 0.5 }} className="mb-8">
         <span className="font-mono text-[11px] text-violet-500/60 tracking-[0.3em] uppercase">About</span>
       </motion.div>
@@ -765,7 +837,10 @@ function SkillsSection() {
   const inView = useInView(ref, { once: true, margin: '-5% 0px' })
   const [active, setActive] = useState<SkillTab>('All')
   return (
-    <section ref={ref} className="px-6 sm:px-10 py-24 border-t border-[#0f0f0f]">
+    <section ref={ref} className="px-6 sm:px-10 py-24 border-t border-[#0f0f0f] relative overflow-hidden">
+      <div className="absolute -bottom-20 -left-20 opacity-45 pointer-events-none">
+        <DecorativeBlob size={220} color="#8b5cf6" />
+      </div>
       <motion.div initial={{ opacity: 0, y: 10 }} animate={inView ? { opacity: 1, y: 0 } : {}} transition={{ duration: 0.5 }}
         className="flex flex-wrap items-center gap-6 mb-12">
         <span className="font-mono text-[11px] text-violet-500/60 tracking-[0.3em] uppercase">Skills</span>
