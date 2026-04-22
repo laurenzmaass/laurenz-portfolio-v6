@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react'
+import React, { useEffect, useRef, useState, useCallback, useMemo, Suspense } from 'react'
 import {
   motion,
   useScroll,
@@ -7,6 +7,10 @@ import {
   useMotionValue,
   AnimatePresence,
 } from 'framer-motion'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { MeshDistortMaterial, Environment } from '@react-three/drei'
+import { EffectComposer, Bloom } from '@react-three/postprocessing'
+import * as THREE from 'three'
 
 // ─── Data ────────────────────────────────────────────────────────────────────
 
@@ -461,160 +465,120 @@ function CapabilityStrip({ reveal }: { reveal: boolean }) {
   )
 }
 
-// ─── Hero Object (icosahedron) ────────────────────────────────────────────────
+// ─── Hero Object (metallic morphing blob) ────────────────────────────────────
 
-function HeroObject() {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const dragRef   = useRef({ dragging: false, lastX: 0, lastY: 0, velX: 0, velY: 0 })
-  const rotRef    = useRef({ x: 0.28, y: 0 })
+function BlobMesh() {
+  const meshRef = useRef<THREE.Mesh>(null)
+  const matRef  = useRef<THREE.MeshStandardMaterial>(null)
 
+  const drag = useRef({ active: false, lastX: 0, lastY: 0, velX: 0, velY: 0 })
+
+  const BASE_COLOR  = useMemo(() => new THREE.Color('#d0d0d8'), [])
+  const HOVER_COLOR = useMemo(() => new THREE.Color('#8b5cf6'), [])
+  const colorTarget = useRef(new THREE.Color('#d0d0d8'))
+
+  // Global pointer listeners so drag works outside the mesh
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const W = 390, H = 420
-    const dpr = Math.min(window.devicePixelRatio ?? 1, 2)
-    canvas.width  = W * dpr
-    canvas.height = H * dpr
-    ctx.scale(dpr, dpr)
-
-    // ── Icosahedron vertices (12) ──────────────────────────────────────────
-    const φ   = (1 + Math.sqrt(5)) / 2
-    const len = Math.sqrt(1 + φ * φ)
-    const rawV: [number, number, number][] = [
-      [ 0,  1,  φ], [ 0, -1,  φ], [ 0,  1, -φ], [ 0, -1, -φ],
-      [ 1,  φ,  0], [-1,  φ,  0], [ 1, -φ,  0], [-1, -φ,  0],
-      [ φ,  0,  1], [-φ,  0,  1], [ φ,  0, -1], [-φ,  0, -1],
-    ]
-    const verts = rawV.map(([x, y, z]) => [x / len, y / len, z / len] as [number, number, number])
-
-    // ── Build 30 edges by distance threshold ──────────────────────────────
-    const edgeLen = 2 / len
-    const edges: [number, number][] = []
-    for (let i = 0; i < verts.length; i++) {
-      for (let j = i + 1; j < verts.length; j++) {
-        const [ax, ay, az] = verts[i]
-        const [bx, by, bz] = verts[j]
-        const d = Math.sqrt((ax-bx)**2 + (ay-by)**2 + (az-bz)**2)
-        if (Math.abs(d - edgeLen) < 0.015) edges.push([i, j])
-      }
+    const onMove = (e: PointerEvent) => {
+      if (!drag.current.active || !meshRef.current) return
+      const dx = e.clientX - drag.current.lastX
+      const dy = e.clientY - drag.current.lastY
+      meshRef.current.rotation.y += dx * 0.008
+      meshRef.current.rotation.x += dy * 0.008
+      drag.current.velX = dy * 0.0012
+      drag.current.velY = dx * 0.0012
+      drag.current.lastX = e.clientX
+      drag.current.lastY = e.clientY
     }
-
-    // ── Math helpers ──────────────────────────────────────────────────────
-    const rotX = (x: number, y: number, z: number, a: number): [number, number, number] =>
-      [x, y * Math.cos(a) - z * Math.sin(a), y * Math.sin(a) + z * Math.cos(a)]
-    const rotY = (x: number, y: number, z: number, a: number): [number, number, number] =>
-      [x * Math.cos(a) + z * Math.sin(a), y, -x * Math.sin(a) + z * Math.cos(a)]
-
-    const project = (x: number, y: number, z: number) => {
-      const fov   = 4.2
-      const scale = fov / (fov + z)
-      return { px: x * scale * 148 + W / 2, py: y * scale * 148 + H / 2, depth: z }
-    }
-
-    // ── Draw loop ─────────────────────────────────────────────────────────
-    let rafId: number
-    const draw = () => {
-      ctx.clearRect(0, 0, W, H)
-
-      const drag = dragRef.current
-      const rot  = rotRef.current
-
-      if (!drag.dragging) {
-        rot.y += 0.0038
-        rot.y += drag.velX * 0.008
-        rot.x += drag.velY * 0.008
-        drag.velX *= 0.90
-        drag.velY *= 0.90
-      }
-
-      // Clamp X rotation to avoid flipping
-      rot.x = Math.max(-0.8, Math.min(0.8, rot.x))
-
-      // Transform all vertices
-      const projected = verts.map(([vx, vy, vz]) => {
-        let [rx, ry, rz] = rotX(vx, vy, vz, rot.x)
-        ;[rx, ry, rz]    = rotY(rx, ry, rz, rot.y)
-        return project(rx, ry, rz)
-      })
-
-      // ── Draw edges ────────────────────────────────────────────────────
-      edges.forEach(([i, j]) => {
-        const a = projected[i], b = projected[j]
-        const depth   = (a.depth + b.depth) / 2
-        const opacity = 0.08 + (depth + 0.85) / 1.7 * 0.52
-        const lw      = 0.4  + (depth + 0.85) / 1.7 * 1.6
-
-        ctx.beginPath()
-        ctx.moveTo(a.px, a.py)
-        ctx.lineTo(b.px, b.py)
-        ctx.strokeStyle = `rgba(139,92,246,${Math.max(0.04, Math.min(0.62, opacity))})`
-        ctx.lineWidth   = Math.max(0.25, Math.min(2.2, lw))
-        ctx.stroke()
-      })
-
-      // ── Draw vertices ─────────────────────────────────────────────────
-      projected.forEach(v => {
-        const opacity = 0.18 + (v.depth + 0.85) / 1.7 * 0.42
-        const size    = 1.2  + (v.depth + 0.85) / 1.7 * 2.2
-
-        // Glow halo
-        const grd = ctx.createRadialGradient(v.px, v.py, 0, v.px, v.py, size * 5)
-        grd.addColorStop(0, `rgba(167,139,250,${Math.min(0.45, opacity * 0.9)})`)
-        grd.addColorStop(1, `rgba(139,92,246,0)`)
-        ctx.beginPath()
-        ctx.arc(v.px, v.py, size * 5, 0, Math.PI * 2)
-        ctx.fillStyle = grd
-        ctx.fill()
-
-        // Core
-        ctx.beginPath()
-        ctx.arc(v.px, v.py, size, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(210,190,255,${Math.min(0.92, opacity * 1.6)})`
-        ctx.fill()
-      })
-
-      rafId = requestAnimationFrame(draw)
-    }
-    rafId = requestAnimationFrame(draw)
-
-    // ── Drag / touch interaction ──────────────────────────────────────────
-    const onDown = (e: MouseEvent) => {
-      dragRef.current = { dragging: true, lastX: e.clientX, lastY: e.clientY, velX: 0, velY: 0 }
-    }
-    const onMove = (e: MouseEvent) => {
-      if (!dragRef.current.dragging) return
-      const dx = e.clientX - dragRef.current.lastX
-      const dy = e.clientY - dragRef.current.lastY
-      rotRef.current.y += dx * 0.009
-      rotRef.current.x += dy * 0.009
-      dragRef.current.velX = dx
-      dragRef.current.velY = dy
-      dragRef.current.lastX = e.clientX
-      dragRef.current.lastY = e.clientY
-    }
-    const onUp = () => { dragRef.current.dragging = false }
-
-    canvas.addEventListener('mousedown', onDown)
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-
+    const onUp = () => { drag.current.active = false }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
     return () => {
-      cancelAnimationFrame(rafId)
-      canvas.removeEventListener('mousedown', onDown)
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
     }
   }, [])
 
+  useFrame((state, delta) => {
+    if (!meshRef.current || !matRef.current) return
+    const mesh = meshRef.current
+    const mat  = matRef.current
+    const d    = drag.current
+
+    if (!d.active) {
+      // Auto-rotate + inertia decay
+      mesh.rotation.y += delta * 0.20 + d.velY
+      mesh.rotation.x += d.velX
+      d.velX *= 0.92
+      d.velY *= 0.92
+      // Soft cursor tilt on X
+      const targetX = state.pointer.y * 0.28
+      mesh.rotation.x += (targetX - mesh.rotation.x) * delta * 1.6
+    }
+
+    // Lerp toward hover/base color
+    mat.color.lerp(colorTarget.current, delta * 3)
+    mat.emissive.lerp(
+      colorTarget.current.clone().multiplyScalar(0.12),
+      delta * 3
+    )
+  })
+
   return (
-    <canvas
-      ref={canvasRef}
-      style={{ width: 390, height: 420 }}
-      className="select-none"
-    />
+    <mesh
+      ref={meshRef}
+      onPointerEnter={() => { colorTarget.current = HOVER_COLOR.clone() }}
+      onPointerLeave={() => { colorTarget.current = BASE_COLOR.clone() }}
+      onPointerDown={(e) => {
+        drag.current = { active: true, lastX: e.clientX, lastY: e.clientY, velX: 0, velY: 0 }
+        e.stopPropagation()
+      }}
+    >
+      <sphereGeometry args={[1, 128, 128]} />
+      <MeshDistortMaterial
+        ref={matRef}
+        color="#d0d0d8"
+        metalness={0.95}
+        roughness={0.06}
+        distort={0.40}
+        speed={1.8}
+        envMapIntensity={2.0}
+        emissive="#000000"
+        emissiveIntensity={1}
+      />
+    </mesh>
+  )
+}
+
+function HeroObject() {
+  return (
+    <div style={{ width: 420, height: 440 }} className="select-none">
+      <Canvas
+        camera={{ position: [0, 0, 2.8], fov: 45 }}
+        dpr={[1, 2]}
+        gl={{ antialias: true, alpha: true }}
+        style={{ background: 'transparent' }}
+      >
+        <Suspense fallback={null}>
+          {/* Lighting */}
+          <ambientLight intensity={0.12} />
+          <directionalLight position={[5, 5, 5]}   intensity={1.0} color="#ffffff" />
+          <directionalLight position={[-4, -2, -4]} intensity={0.3} color="#a78bfa" />
+          <pointLight       position={[0, 4, 2]}    intensity={0.6} color="#ffffff" />
+          {/* Studio HDR env for chrome-like reflections */}
+          <Environment preset="studio" />
+          <BlobMesh />
+          <EffectComposer>
+            <Bloom
+              luminanceThreshold={0.55}
+              luminanceSmoothing={0.85}
+              intensity={1.1}
+              mipmapBlur
+            />
+          </EffectComposer>
+        </Suspense>
+      </Canvas>
+    </div>
   )
 }
 
