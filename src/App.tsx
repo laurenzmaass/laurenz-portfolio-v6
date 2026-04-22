@@ -469,7 +469,8 @@ function CapabilityStrip({ reveal }: { reveal: boolean }) {
 
 function BlobMesh() {
   const meshRef = useRef<THREE.Mesh>(null)
-  const matRef  = useRef<THREE.MeshStandardMaterial>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const matRef = useRef<any>(null)
 
   const drag = useRef({ active: false, lastX: 0, lastY: 0, velX: 0, velY: 0 })
 
