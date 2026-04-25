@@ -471,6 +471,7 @@ function CapabilityStrip({ reveal }: { reveal: boolean }) {
 const BLOB_VERT = /* glsl */`
   uniform float uTime;
   uniform float uDistort;
+  uniform float uPulse;
   varying vec3  vPos;
   varying vec3  vNorm;
   varying vec3  vViewPos;
@@ -482,27 +483,28 @@ const BLOB_VERT = /* glsl */`
       cos(p.y * 4.1 - p.z * 3.3    + uTime * 0.80) * 0.20;
   }
 
-  // Displaced point on sphere (uses sphere normal = normalize(p))
-  vec3 dp(vec3 p) {
-    return p + normalize(p) * dn(p * 1.4) * uDistort;
+  vec3 dp(vec3 p, float d) {
+    return p + normalize(p) * dn(p * 1.4) * d;
   }
 
   void main() {
     vPos = position;
-    float e = 0.010;
-    vec3 p0 = dp(position);
-    vec3 px  = dp(position + vec3(e, 0.0, 0.0));
-    vec3 py  = dp(position + vec3(0.0, e, 0.0));
-    // True surface normal of the displaced mesh
+    // Pulse inflates the blob on click
+    float dist = uDistort * (1.0 + uPulse * 1.8);
+    float e    = 0.010;
+    vec3 p0 = dp(position,              dist);
+    vec3 px = dp(position + vec3(e,0,0), dist);
+    vec3 py = dp(position + vec3(0,e,0), dist);
     vNorm    = normalize(normalMatrix * normalize(cross(py - p0, px - p0)));
     vViewPos = (modelViewMatrix * vec4(p0, 1.0)).xyz;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(p0, 1.0);
   }
 `
 
-// Fragment shader: physically-plausible lighting + additive depth cue
+// Fragment shader: aurora + iridescence + click pulse
 const BLOB_FRAG = /* glsl */`
   uniform float uTime;
+  uniform float uPulse;
   varying vec3  vPos;
   varying vec3  vNorm;
   varying vec3  vViewPos;
@@ -510,7 +512,7 @@ const BLOB_FRAG = /* glsl */`
   void main() {
     float t = uTime * 0.18;
 
-    // Aurora palette
+    // ── Aurora base palette ───────────────────────────────────────
     vec3 c0 = vec3(0.43, 0.11, 0.88);   // vivid violet
     vec3 c1 = vec3(0.18, 0.27, 0.96);   // cobalt blue
     vec3 c2 = vec3(0.02, 0.72, 0.85);   // teal
@@ -524,27 +526,45 @@ const BLOB_FRAG = /* glsl */`
     base = mix(base, c2, n2 * 0.60);
     base = mix(base, c3, n3 * 0.45);
 
-    // Perspective-correct view direction and displaced normal
+    // ── View / normal setup ───────────────────────────────────────
     vec3 vd = normalize(-vViewPos);
     vec3 n  = normalize(vNorm);
 
-    // Key light (top-right, white)
-    vec3 l1   = normalize(vec3(2.5,  3.5, 3.0));
-    float d1  = max(dot(n, l1), 0.0);
-    float s1  = pow(max(dot(reflect(-l1, n), vd), 0.0), 40.0);
+    // ── Diffuse + specular lighting ───────────────────────────────
+    vec3  l1 = normalize(vec3( 2.5,  3.5, 3.0));
+    float d1 = max(dot(n, l1), 0.0);
+    // Sharp primary specular
+    float s1 = pow(max(dot(reflect(-l1, n), vd), 0.0), 64.0) * 0.70;
+    // Soft secondary specular (fill light, violet tint)
+    vec3  l2 = normalize(vec3(-2.5, -1.5, 2.0));
+    float d2 = max(dot(n, l2), 0.0) * 0.35;
+    float s2 = pow(max(dot(reflect(-l2, n), vd), 0.0), 22.0) * 0.30;
 
-    // Fill light (bottom-left, violet)
-    vec3 l2   = normalize(vec3(-2.5, -1.5, 2.0));
-    float d2  = max(dot(n, l2), 0.0) * 0.35;
+    // ── Fresnel rim ───────────────────────────────────────────────
+    float rimAmt = pow(1.0 - abs(dot(n, vd)), 3.0);
+    // Rim flares on click
+    float rimStr = 1.30 + uPulse * 1.60;
 
-    // Fresnel rim — follows actual displaced silhouette
-    float rim = pow(1.0 - abs(dot(n, vd)), 3.0);
+    // ── Iridescent thin-film layer ────────────────────────────────
+    // Shifts through the spectrum based on view angle + slow time
+    float ird = 1.0 - abs(dot(n, vd));
+    vec3 irid = 0.5 + 0.5 * cos(
+      vec3(0.0, 2.094, 4.189) +   // R/G/B phase offset (0, 2π/3, 4π/3)
+      ird * 5.5 + uTime * 0.30
+    );
+    // Iridescence only near grazing angles, boosted on pulse
+    float iridStr = pow(ird, 1.4) * (0.30 + uPulse * 0.20);
 
+    // ── Compose ───────────────────────────────────────────────────
     vec3 col  = base * (0.20 + d1 * 0.80 + d2);
-    col += rim * c0 * 1.30;
-    col += vec3(s1 * 0.60);
+    col += rimAmt * c0 * rimStr;
+    col += vec3(s1);
+    col += c0 * s2;
+    col += irid * iridStr;
+    // Pulse brightens entire surface briefly
+    col *= (1.0 + uPulse * 0.45);
 
-    // Additive depth cue: back hemisphere → near zero → "see-through"
+    // ── Additive depth cue (back → dark → transparent) ────────────
     float facing = max(dot(n, vd), 0.0);
     col *= (0.10 + facing * 0.90);
 
@@ -582,6 +602,7 @@ function BlobMesh() {
   const uniforms = useMemo(() => ({
     uTime:    { value: 0 },
     uDistort: { value: 0.28 },
+    uPulse:   { value: 0 },
   }), [])
 
   useFrame((state, delta) => {
@@ -590,7 +611,8 @@ function BlobMesh() {
     const mat  = matRef.current
     const d    = drag.current
 
-    mat.uniforms.uTime.value = state.clock.elapsedTime
+    mat.uniforms.uTime.value  = state.clock.elapsedTime
+    mat.uniforms.uPulse.value = Math.max(0, mat.uniforms.uPulse.value - delta * 2.5)
 
     if (!d.active) {
       mesh.rotation.y += delta * 0.20 + d.velY
@@ -606,6 +628,7 @@ function BlobMesh() {
     <mesh
       ref={meshRef}
       onPointerDown={(e) => {
+        if (matRef.current) matRef.current.uniforms.uPulse.value = 1.0
         drag.current = { active: true, lastX: e.clientX, lastY: e.clientY, velX: 0, velY: 0 }
         e.stopPropagation()
       }}
@@ -617,7 +640,6 @@ function BlobMesh() {
         fragmentShader={BLOB_FRAG}
         uniforms={uniforms}
         transparent
-        depthWrite={false}
         blending={THREE.AdditiveBlending}
       />
     </mesh>
