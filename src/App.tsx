@@ -489,8 +489,8 @@ const BLOB_VERT = /* glsl */`
 
   void main() {
     vPos = position;
-    // Pulse inflates the blob on click
-    float dist = uDistort * (1.0 + uPulse * 1.8);
+    // Pulse gently inflates the blob on click
+    float dist = uDistort * (1.0 + uPulse * 0.45);
     float e    = 0.010;
     vec3 p0 = dp(position,              dist);
     vec3 px = dp(position + vec3(e,0,0), dist);
@@ -526,47 +526,47 @@ const BLOB_FRAG = /* glsl */`
     base = mix(base, c2, n2 * 0.60);
     base = mix(base, c3, n3 * 0.45);
 
-    // ── View / normal setup ───────────────────────────────────────
+    // ── View / normal ─────────────────────────────────────────────
     vec3 vd = normalize(-vViewPos);
     vec3 n  = normalize(vNorm);
+    float facing = dot(n, vd);
 
-    // ── Diffuse + specular lighting ───────────────────────────────
+    // Discard back-facing fragments (displacement can flip winding near silhouette)
+    if (facing < 0.0) discard;
+
+    // ── Diffuse + specular ────────────────────────────────────────
     vec3  l1 = normalize(vec3( 2.5,  3.5, 3.0));
     float d1 = max(dot(n, l1), 0.0);
-    // Sharp primary specular
-    float s1 = pow(max(dot(reflect(-l1, n), vd), 0.0), 64.0) * 0.70;
-    // Soft secondary specular (fill light, violet tint)
+    float s1 = pow(max(dot(reflect(-l1, n), vd), 0.0), 64.0) * 0.55;
     vec3  l2 = normalize(vec3(-2.5, -1.5, 2.0));
-    float d2 = max(dot(n, l2), 0.0) * 0.35;
-    float s2 = pow(max(dot(reflect(-l2, n), vd), 0.0), 22.0) * 0.30;
+    float d2 = max(dot(n, l2), 0.0) * 0.30;
+    float s2 = pow(max(dot(reflect(-l2, n), vd), 0.0), 22.0) * 0.22;
 
-    // ── Fresnel rim ───────────────────────────────────────────────
-    float rimAmt = pow(1.0 - abs(dot(n, vd)), 3.0);
-    // Rim flares on click
-    float rimStr = 1.30 + uPulse * 1.60;
-
-    // ── Iridescent thin-film layer ────────────────────────────────
-    // Shifts through the spectrum based on view angle + slow time
-    float ird = 1.0 - abs(dot(n, vd));
-    vec3 irid = 0.5 + 0.5 * cos(
-      vec3(0.0, 2.094, 4.189) +   // R/G/B phase offset (0, 2π/3, 4π/3)
-      ird * 5.5 + uTime * 0.30
-    );
-    // Iridescence only near grazing angles, boosted on pulse
-    float iridStr = pow(ird, 1.4) * (0.30 + uPulse * 0.20);
-
-    // ── Compose ───────────────────────────────────────────────────
-    vec3 col  = base * (0.20 + d1 * 0.80 + d2);
-    col += rimAmt * c0 * rimStr;
+    // ── Base lit color ────────────────────────────────────────────
+    vec3 col = base * (0.20 + d1 * 0.80 + d2);
     col += vec3(s1);
-    col += c0 * s2;
-    col += irid * iridStr;
-    // Pulse brightens entire surface briefly
-    col *= (1.0 + uPulse * 0.45);
+    col += base * s2;
 
-    // ── Additive depth cue (back → dark → transparent) ────────────
-    float facing = max(dot(n, vd), 0.0);
-    col *= (0.10 + facing * 0.90);
+    // Edge glow in aurora colors — NO separate tint, so no second-layer shell
+    float edgeAmt = pow(1.0 - facing, 2.2);
+    col += base * edgeAmt * (0.45 + uPulse * 0.35);
+
+    // Pulse brightens the whole surface (smooth exponential decay in JS)
+    col *= (1.0 + uPulse * 0.18);
+
+    // ── Additive depth cue: silhouette → 0 → transparent ─────────
+    // Pure facing multiply (no floor) → edges are truly transparent
+    col *= facing;
+
+    // ── Iridescent thin-film — applied AFTER depth cue ────────────
+    // At edges facing≈0, ird≈1 → rainbow sheen is clearly visible
+    float ird = 1.0 - facing;
+    vec3 irid = 0.5 + 0.5 * cos(
+      vec3(0.0, 2.094, 4.189) +   // 120° R/G/B phase offsets
+      ird * 4.5 + uTime * 0.28
+    );
+    float iridStr = pow(ird, 1.5) * (0.65 + uPulse * 0.40);
+    col += irid * iridStr;
 
     col = pow(clamp(col, 0.0, 1.0), vec3(0.82));
     gl_FragColor = vec4(col, 1.0);
@@ -612,7 +612,8 @@ function BlobMesh() {
     const d    = drag.current
 
     mat.uniforms.uTime.value  = state.clock.elapsedTime
-    mat.uniforms.uPulse.value = Math.max(0, mat.uniforms.uPulse.value - delta * 2.5)
+    // Exponential decay → rate proportional to current value → smooth, natural fade (~1.5 s)
+    mat.uniforms.uPulse.value *= Math.exp(-delta * 2.8)
 
     if (!d.active) {
       mesh.rotation.y += delta * 0.20 + d.velY
