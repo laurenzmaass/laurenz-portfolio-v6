@@ -489,8 +489,8 @@ const BLOB_VERT = /* glsl */`
 
   void main() {
     vPos = position;
-    // Pulse gently inflates the blob on click
-    float dist = uDistort * (1.0 + uPulse * 0.45);
+    // Pulse inflates the blob on click
+    float dist = uDistort * (1.0 + uPulse * 0.80);
     float e    = 0.010;
     vec3 p0 = dp(position,              dist);
     vec3 px = dp(position + vec3(e,0,0), dist);
@@ -549,23 +549,24 @@ const BLOB_FRAG = /* glsl */`
 
     // Edge glow in aurora colors — NO separate tint, so no second-layer shell
     float edgeAmt = pow(1.0 - facing, 2.2);
-    col += base * edgeAmt * (0.45 + uPulse * 0.35);
+    col += base * edgeAmt * (0.45 + uPulse * 0.70);
 
-    // Pulse brightens the whole surface (smooth exponential decay in JS)
-    col *= (1.0 + uPulse * 0.18);
+    // Pulse brightens the whole surface
+    col *= (1.0 + uPulse * 0.25);
 
-    // ── Additive depth cue: silhouette → 0 → transparent ─────────
-    // Pure facing multiply (no floor) → edges are truly transparent
-    col *= facing;
+    // ── Additive depth cue ────────────────────────────────────────
+    // Small floor (0.12) keeps the blob visible from all rotation angles;
+    // discard above already blocks any true back-facing geometry.
+    col *= (0.12 + facing * 0.88);
 
     // ── Iridescent thin-film — applied AFTER depth cue ────────────
-    // At edges facing≈0, ird≈1 → rainbow sheen is clearly visible
+    // At edges facing≈0, ird≈1 → rainbow sheen clearly visible
     float ird = 1.0 - facing;
     vec3 irid = 0.5 + 0.5 * cos(
       vec3(0.0, 2.094, 4.189) +   // 120° R/G/B phase offsets
       ird * 4.5 + uTime * 0.28
     );
-    float iridStr = pow(ird, 1.5) * (0.65 + uPulse * 0.40);
+    float iridStr = pow(ird, 1.5) * (0.65 + uPulse * 0.95);
     col += irid * iridStr;
 
     col = pow(clamp(col, 0.0, 1.0), vec3(0.82));
@@ -574,9 +575,12 @@ const BLOB_FRAG = /* glsl */`
 `
 
 function BlobMesh() {
-  const meshRef = useRef<THREE.Mesh>(null)
-  const matRef  = useRef<THREE.ShaderMaterial | null>(null)
-  const drag    = useRef({ active: false, lastX: 0, lastY: 0, velX: 0, velY: 0 })
+  const meshRef    = useRef<THREE.Mesh>(null)
+  const matRef     = useRef<THREE.ShaderMaterial | null>(null)
+  const drag       = useRef({ active: false, lastX: 0, lastY: 0, velX: 0, velY: 0 })
+  // Tracks when the last click happened (in clock time); -99 = never clicked
+  const clickTime  = useRef(-99)
+  const clockNow   = useRef(0)
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
@@ -611,9 +615,20 @@ function BlobMesh() {
     const mat  = matRef.current
     const d    = drag.current
 
-    mat.uniforms.uTime.value  = state.clock.elapsedTime
-    // Exponential decay → rate proportional to current value → smooth, natural fade (~1.5 s)
-    mat.uniforms.uPulse.value *= Math.exp(-delta * 2.8)
+    clockNow.current = state.clock.elapsedTime
+    mat.uniforms.uTime.value = state.clock.elapsedTime
+
+    // Smooth click pulse: cubic ease-in rise (0 → 1 over 0.28 s), then exp decay
+    // This removes the hard "jump to 1" that made it feel hectic
+    const tp = state.clock.elapsedTime - clickTime.current
+    if (tp < 0) {
+      mat.uniforms.uPulse.value = 0
+    } else if (tp < 0.28) {
+      const x = tp / 0.28
+      mat.uniforms.uPulse.value = x * x * (3 - 2 * x)   // smoothstep 0 → 1
+    } else {
+      mat.uniforms.uPulse.value = Math.exp(-(tp - 0.28) * 1.8)  // slow exp decay ~2 s
+    }
 
     if (!d.active) {
       mesh.rotation.y += delta * 0.20 + d.velY
@@ -629,7 +644,7 @@ function BlobMesh() {
     <mesh
       ref={meshRef}
       onPointerDown={(e) => {
-        if (matRef.current) matRef.current.uniforms.uPulse.value = 1.0
+        clickTime.current = clockNow.current   // record click time for smooth rise
         drag.current = { active: true, lastX: e.clientX, lastY: e.clientY, velX: 0, velY: 0 }
         e.stopPropagation()
       }}
