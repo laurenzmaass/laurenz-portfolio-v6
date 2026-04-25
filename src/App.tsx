@@ -8,7 +8,7 @@ import {
   AnimatePresence,
 } from 'framer-motion'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { MeshDistortMaterial } from '@react-three/drei'
+// no drei import needed — custom shaders replace MeshDistortMaterial
 import { EffectComposer, Bloom } from '@react-three/postprocessing'
 import * as THREE from 'three'
 
@@ -465,20 +465,76 @@ function CapabilityStrip({ reveal }: { reveal: boolean }) {
   )
 }
 
-// ─── Hero Object (metallic morphing blob) ────────────────────────────────────
+// ─── Hero Object (aurora morphing blob) ──────────────────────────────────────
+
+// Vertex shader: sine-noise displacement to morph the sphere
+const BLOB_VERT = /* glsl */`
+  uniform float uTime;
+  uniform float uDistort;
+  varying vec3  vPos;
+  varying vec3  vNorm;
+
+  float dn(vec3 p) {
+    return
+      sin(p.x * 2.1 + uTime * 0.70) * cos(p.y * 1.8 + uTime * 0.50) * sin(p.z * 2.4 + uTime * 0.60) * 0.50 +
+      sin(p.x * 3.7 + p.y * 2.9    + uTime * 0.40) * 0.30 +
+      cos(p.y * 4.1 - p.z * 3.3    + uTime * 0.80) * 0.20;
+  }
+
+  void main() {
+    vPos  = position;
+    vNorm = normalize(normalMatrix * normal);
+    vec3 disp = position + normal * dn(position * 1.4) * uDistort;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(disp, 1.0);
+  }
+`
+
+// Fragment shader: aurora palette animated across the surface
+const BLOB_FRAG = /* glsl */`
+  uniform float uTime;
+  uniform float uHover;
+  varying vec3  vPos;
+  varying vec3  vNorm;
+
+  void main() {
+    float t = uTime * 0.18;
+
+    vec3 c0 = vec3(0.43, 0.11, 0.88);   // vivid violet
+    vec3 c1 = vec3(0.18, 0.27, 0.96);   // cobalt blue
+    vec3 c2 = vec3(0.02, 0.72, 0.85);   // teal
+    vec3 c3 = vec3(0.52, 0.08, 0.78);   // deep purple
+    vec3 hv = vec3(0.05, 0.87, 0.72);   // cyan (hover accent)
+
+    float n1 = (sin(vPos.x * 2.5 + t * 1.40)             + 1.0) * 0.5;
+    float n2 = (cos(vPos.y * 2.0 - t * 1.10 + 1.2)       + 1.0) * 0.5;
+    float n3 = (sin(vPos.z * 1.9 + vPos.x   + t * 0.95)  + 1.0) * 0.5;
+    float n4 = (cos((vPos.x + vPos.y) * 1.7 + t * 1.55)  + 1.0) * 0.5;
+
+    vec3 col = mix(c0, c1, n1);
+    col = mix(col, c2, n2 * 0.60);
+    col = mix(col, c3, n3 * 0.45);
+    col = mix(col, hv, uHover * 0.50);
+
+    // Fresnel rim glow
+    float rim = pow(1.0 - abs(dot(vNorm, vec3(0.0, 0.0, 1.0))), 2.5);
+    col += c0 * rim * 0.90;
+
+    // Simple specular
+    vec3 lightDir = normalize(vec3(1.4, 2.0, 2.5));
+    float spec    = pow(max(dot(vNorm, lightDir), 0.0), 30.0);
+    col += vec3(spec * 0.50);
+
+    col = pow(clamp(col, 0.0, 1.0), vec3(0.85));
+    gl_FragColor = vec4(col, 1.0);
+  }
+`
 
 function BlobMesh() {
-  const meshRef = useRef<THREE.Mesh>(null)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const matRef = useRef<any>(null)
+  const meshRef     = useRef<THREE.Mesh>(null)
+  const matRef      = useRef<THREE.ShaderMaterial | null>(null)
+  const drag        = useRef({ active: false, lastX: 0, lastY: 0, velX: 0, velY: 0 })
+  const hoverTarget = useRef(0)
 
-  const drag = useRef({ active: false, lastX: 0, lastY: 0, velX: 0, velY: 0 })
-
-  const BASE_COLOR  = useMemo(() => new THREE.Color('#d0d0d8'), [])
-  const HOVER_COLOR = useMemo(() => new THREE.Color('#8b5cf6'), [])
-  const colorTarget = useRef(new THREE.Color('#d0d0d8'))
-
-  // Global pointer listeners so drag works outside the mesh
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
       if (!drag.current.active || !meshRef.current) return
@@ -500,52 +556,47 @@ function BlobMesh() {
     }
   }, [])
 
+  const uniforms = useMemo(() => ({
+    uTime:    { value: 0 },
+    uDistort: { value: 0.42 },
+    uHover:   { value: 0 },
+  }), [])
+
   useFrame((state, delta) => {
     if (!meshRef.current || !matRef.current) return
     const mesh = meshRef.current
     const mat  = matRef.current
     const d    = drag.current
 
+    mat.uniforms.uTime.value   = state.clock.elapsedTime
+    mat.uniforms.uHover.value += (hoverTarget.current - mat.uniforms.uHover.value) * delta * 4
+
     if (!d.active) {
-      // Auto-rotate + inertia decay
       mesh.rotation.y += delta * 0.20 + d.velY
       mesh.rotation.x += d.velX
       d.velX *= 0.92
       d.velY *= 0.92
-      // Soft cursor tilt on X
       const targetX = state.pointer.y * 0.28
       mesh.rotation.x += (targetX - mesh.rotation.x) * delta * 1.6
     }
-
-    // Lerp toward hover/base color
-    mat.color.lerp(colorTarget.current, delta * 3)
-    mat.emissive.lerp(
-      colorTarget.current.clone().multiplyScalar(0.12),
-      delta * 3
-    )
   })
 
   return (
     <mesh
       ref={meshRef}
-      onPointerEnter={() => { colorTarget.current = HOVER_COLOR.clone() }}
-      onPointerLeave={() => { colorTarget.current = BASE_COLOR.clone() }}
+      onPointerEnter={() => { hoverTarget.current = 1 }}
+      onPointerLeave={() => { hoverTarget.current = 0 }}
       onPointerDown={(e) => {
         drag.current = { active: true, lastX: e.clientX, lastY: e.clientY, velX: 0, velY: 0 }
         e.stopPropagation()
       }}
     >
       <sphereGeometry args={[1, 128, 128]} />
-      <MeshDistortMaterial
+      <shaderMaterial
         ref={matRef}
-        color="#d0d0d8"
-        metalness={0.88}
-        roughness={0.14}
-        distort={0.40}
-        speed={1.8}
-        envMapIntensity={0}
-        emissive="#000000"
-        emissiveIntensity={1}
+        vertexShader={BLOB_VERT}
+        fragmentShader={BLOB_FRAG}
+        uniforms={uniforms}
       />
     </mesh>
   )
@@ -562,19 +613,12 @@ function HeroObject() {
         onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
       >
         <Suspense fallback={null}>
-          {/* Abstract colored point lighting — no HDR env */}
-          <ambientLight intensity={0.06} />
-          <pointLight position={[4,   3,  4]} intensity={2.8} color="#ffffff" />
-          <pointLight position={[-5,  2, -3]} intensity={2.2} color="#a78bfa" />
-          <pointLight position={[0,  -5,  2]} intensity={1.4} color="#818cf8" />
-          <pointLight position={[3,   5, -2]} intensity={1.0} color="#e0e0ff" />
-          <pointLight position={[-3, -2,  5]} intensity={0.9} color="#c4b5fd" />
           <BlobMesh />
           <EffectComposer>
             <Bloom
-              luminanceThreshold={0.50}
+              luminanceThreshold={0.55}
               luminanceSmoothing={0.85}
-              intensity={1.3}
+              intensity={1.4}
               mipmapBlur
             />
           </EffectComposer>
@@ -584,71 +628,49 @@ function HeroObject() {
   )
 }
 
-// ─── Decorative Blob ──────────────────────────────────────────────────────────
-
-function DecorativeBlobMesh({ color }: { color: string }) {
-  const meshRef = useRef<THREE.Mesh>(null)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const matRef  = useRef<any>(null)
-
-  useFrame((_, delta) => {
-    if (!meshRef.current) return
-    meshRef.current.rotation.y += delta * 0.15
-    meshRef.current.rotation.x += delta * 0.09
-  })
-
-  return (
-    <mesh ref={meshRef}>
-      <sphereGeometry args={[1, 64, 64]} />
-      <MeshDistortMaterial
-        ref={matRef}
-        color={color}
-        metalness={0.82}
-        roughness={0.20}
-        distort={0.48}
-        speed={1.3}
-        envMapIntensity={0}
-        transparent
-        opacity={0.70}
-      />
-    </mesh>
-  )
-}
+// ─── Decorative Blob (CSS gradient — no extra WebGL context) ─────────────────
 
 function DecorativeBlob({
   size = 200,
-  color = '#6366f1',
+  color1 = '#7c3aed',
+  color2 = '#2563eb',
   className = '',
   style,
 }: {
   size?: number
-  color?: string
+  color1?: string
+  color2?: string
   className?: string
   style?: React.CSSProperties
 }) {
   return (
-    <div
+    <motion.div
       className={`pointer-events-none select-none ${className}`}
-      style={{ width: size, height: size, ...style }}
-    >
-      <Canvas
-        camera={{ position: [0, 0, 2.8], fov: 45 }}
-        dpr={[1, 2]}
-        gl={{ antialias: true, alpha: true }}
-        onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
-      >
-        <Suspense fallback={null}>
-          <ambientLight intensity={0.05} />
-          <pointLight position={[3,  3,  3]} intensity={2.2} color="#ffffff" />
-          <pointLight position={[-3, -2, 2]} intensity={1.6} color={color} />
-          <pointLight position={[0,  4, -2]} intensity={1.0} color="#e0e8ff" />
-          <DecorativeBlobMesh color={color} />
-          <EffectComposer>
-            <Bloom luminanceThreshold={0.45} intensity={0.9} mipmapBlur />
-          </EffectComposer>
-        </Suspense>
-      </Canvas>
-    </div>
+      style={{
+        width: size,
+        height: size,
+        borderRadius: '40% 60% 55% 45% / 55% 45% 60% 40%',
+        background: `radial-gradient(circle at 38% 42%, ${color1}cc, ${color2}77, transparent 68%)`,
+        filter: `blur(${Math.round(size * 0.22)}px)`,
+        ...style,
+      }}
+      animate={{
+        borderRadius: [
+          '40% 60% 55% 45% / 55% 45% 60% 40%',
+          '55% 45% 48% 52% / 42% 58% 45% 55%',
+          '48% 52% 60% 40% / 60% 40% 52% 48%',
+          '40% 60% 55% 45% / 55% 45% 60% 40%',
+        ],
+        scale: [1, 1.14, 0.94, 1.10, 1],
+        rotate: [0, 28, -18, 42, 0],
+      }}
+      transition={{
+        duration: 16,
+        repeat: Infinity,
+        ease: 'easeInOut',
+        times: [0, 0.28, 0.55, 0.78, 1],
+      }}
+    />
   )
 }
 
@@ -801,10 +823,7 @@ function AboutSection() {
   const ref = useRef(null)
   const inView = useInView(ref, { once: true, margin: '-8% 0px' })
   return (
-    <section ref={ref} className="px-6 sm:px-10 py-32 overflow-hidden relative">
-      <div className="absolute -top-16 -right-16 opacity-50 pointer-events-none">
-        <DecorativeBlob size={260} color="#6366f1" />
-      </div>
+    <section ref={ref} className="px-6 sm:px-10 py-32 relative">
       <motion.div initial={{ opacity: 0, y: 10 }} animate={inView ? { opacity: 1, y: 0 } : {}} transition={{ duration: 0.5 }} className="mb-8">
         <span className="font-mono text-[11px] text-violet-500/60 tracking-[0.3em] uppercase">About</span>
       </motion.div>
@@ -837,10 +856,7 @@ function SkillsSection() {
   const inView = useInView(ref, { once: true, margin: '-5% 0px' })
   const [active, setActive] = useState<SkillTab>('All')
   return (
-    <section ref={ref} className="px-6 sm:px-10 py-24 border-t border-[#0f0f0f] relative overflow-hidden">
-      <div className="absolute -bottom-20 -left-20 opacity-45 pointer-events-none">
-        <DecorativeBlob size={220} color="#8b5cf6" />
-      </div>
+    <section ref={ref} className="px-6 sm:px-10 py-24 border-t border-[#0f0f0f] relative">
       <motion.div initial={{ opacity: 0, y: 10 }} animate={inView ? { opacity: 1, y: 0 } : {}} transition={{ duration: 0.5 }}
         className="flex flex-wrap items-center gap-6 mb-12">
         <span className="font-mono text-[11px] text-violet-500/60 tracking-[0.3em] uppercase">Skills</span>
@@ -1172,9 +1188,31 @@ export default function App() {
       {/* Page sections */}
       <HeroSection />
       <Marquee text="Frontend Developer · Vibecoder · Automation Builder · UI Designer · Berlin · n8n · React · Make · Open to Work" />
-      <AboutSection />
+
+      {/* About — decorative glow top-right */}
+      <div className="relative">
+        <DecorativeBlob
+          size={360}
+          color1="#7c3aed"
+          color2="#3b82f6"
+          className="absolute -top-20 -right-20 opacity-50"
+        />
+        <AboutSection />
+      </div>
+
       <Marquee text="UI Design · React · TypeScript · Tailwind · n8n · Make · Figma · Vibe Coding · Workflow Automation · API Integration" />
-      <SkillsSection />
+
+      {/* Skills — decorative glow bottom-left */}
+      <div className="relative">
+        <DecorativeBlob
+          size={300}
+          color1="#4f46e5"
+          color2="#0891b2"
+          className="absolute -bottom-20 -left-20 opacity-45"
+        />
+        <SkillsSection />
+      </div>
+
       <ProjectsSection />
       <ContactSection />
 
