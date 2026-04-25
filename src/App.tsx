@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo, Suspense } from 'react'
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import {
   motion,
   useScroll,
@@ -9,7 +9,7 @@ import {
 } from 'framer-motion'
 import { Canvas, useFrame } from '@react-three/fiber'
 // no drei import needed — custom shaders replace MeshDistortMaterial
-import { EffectComposer, Bloom } from '@react-three/postprocessing'
+// postprocessing removed — additive blending creates natural glow
 import * as THREE from 'three'
 
 // ─── Data ────────────────────────────────────────────────────────────────────
@@ -467,12 +467,13 @@ function CapabilityStrip({ reveal }: { reveal: boolean }) {
 
 // ─── Hero Object (aurora morphing blob) ──────────────────────────────────────
 
-// Vertex shader: sine-noise displacement to morph the sphere
+// Vertex shader: displaced normals via finite differences → real 3-D shading
 const BLOB_VERT = /* glsl */`
   uniform float uTime;
   uniform float uDistort;
   varying vec3  vPos;
   varying vec3  vNorm;
+  varying vec3  vViewPos;
 
   float dn(vec3 p) {
     return
@@ -481,59 +482,81 @@ const BLOB_VERT = /* glsl */`
       cos(p.y * 4.1 - p.z * 3.3    + uTime * 0.80) * 0.20;
   }
 
+  // Displaced point on sphere (uses sphere normal = normalize(p))
+  vec3 dp(vec3 p) {
+    return p + normalize(p) * dn(p * 1.4) * uDistort;
+  }
+
   void main() {
-    vPos  = position;
-    vNorm = normalize(normalMatrix * normal);
-    vec3 disp = position + normal * dn(position * 1.4) * uDistort;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(disp, 1.0);
+    vPos = position;
+    float e = 0.010;
+    vec3 p0 = dp(position);
+    vec3 px  = dp(position + vec3(e, 0.0, 0.0));
+    vec3 py  = dp(position + vec3(0.0, e, 0.0));
+    // True surface normal of the displaced mesh
+    vNorm    = normalize(normalMatrix * normalize(cross(py - p0, px - p0)));
+    vViewPos = (modelViewMatrix * vec4(p0, 1.0)).xyz;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(p0, 1.0);
   }
 `
 
-// Fragment shader: aurora palette animated across the surface
+// Fragment shader: physically-plausible lighting + additive depth cue
 const BLOB_FRAG = /* glsl */`
   uniform float uTime;
-  uniform float uHover;
   varying vec3  vPos;
   varying vec3  vNorm;
+  varying vec3  vViewPos;
 
   void main() {
     float t = uTime * 0.18;
 
+    // Aurora palette
     vec3 c0 = vec3(0.43, 0.11, 0.88);   // vivid violet
     vec3 c1 = vec3(0.18, 0.27, 0.96);   // cobalt blue
     vec3 c2 = vec3(0.02, 0.72, 0.85);   // teal
     vec3 c3 = vec3(0.52, 0.08, 0.78);   // deep purple
-    vec3 hv = vec3(0.05, 0.87, 0.72);   // cyan (hover accent)
 
-    float n1 = (sin(vPos.x * 2.5 + t * 1.40)             + 1.0) * 0.5;
-    float n2 = (cos(vPos.y * 2.0 - t * 1.10 + 1.2)       + 1.0) * 0.5;
-    float n3 = (sin(vPos.z * 1.9 + vPos.x   + t * 0.95)  + 1.0) * 0.5;
-    float n4 = (cos((vPos.x + vPos.y) * 1.7 + t * 1.55)  + 1.0) * 0.5;
+    float n1 = (sin(vPos.x * 2.5 + t * 1.40)            + 1.0) * 0.5;
+    float n2 = (cos(vPos.y * 2.0 - t * 1.10 + 1.2)      + 1.0) * 0.5;
+    float n3 = (sin(vPos.z * 1.9 + vPos.x   + t * 0.95) + 1.0) * 0.5;
 
-    vec3 col = mix(c0, c1, n1);
-    col = mix(col, c2, n2 * 0.60);
-    col = mix(col, c3, n3 * 0.45);
-    col = mix(col, hv, uHover * 0.50);
+    vec3 base = mix(c0, c1, n1);
+    base = mix(base, c2, n2 * 0.60);
+    base = mix(base, c3, n3 * 0.45);
 
-    // Fresnel rim glow
-    float rim = pow(1.0 - abs(dot(vNorm, vec3(0.0, 0.0, 1.0))), 2.5);
-    col += c0 * rim * 0.90;
+    // Perspective-correct view direction and displaced normal
+    vec3 vd = normalize(-vViewPos);
+    vec3 n  = normalize(vNorm);
 
-    // Simple specular
-    vec3 lightDir = normalize(vec3(1.4, 2.0, 2.5));
-    float spec    = pow(max(dot(vNorm, lightDir), 0.0), 30.0);
-    col += vec3(spec * 0.50);
+    // Key light (top-right, white)
+    vec3 l1   = normalize(vec3(2.5,  3.5, 3.0));
+    float d1  = max(dot(n, l1), 0.0);
+    float s1  = pow(max(dot(reflect(-l1, n), vd), 0.0), 40.0);
 
-    col = pow(clamp(col, 0.0, 1.0), vec3(0.85));
+    // Fill light (bottom-left, violet)
+    vec3 l2   = normalize(vec3(-2.5, -1.5, 2.0));
+    float d2  = max(dot(n, l2), 0.0) * 0.35;
+
+    // Fresnel rim — follows actual displaced silhouette
+    float rim = pow(1.0 - abs(dot(n, vd)), 3.0);
+
+    vec3 col  = base * (0.20 + d1 * 0.80 + d2);
+    col += rim * c0 * 1.30;
+    col += vec3(s1 * 0.60);
+
+    // Additive depth cue: back hemisphere → near zero → "see-through"
+    float facing = max(dot(n, vd), 0.0);
+    col *= (0.10 + facing * 0.90);
+
+    col = pow(clamp(col, 0.0, 1.0), vec3(0.82));
     gl_FragColor = vec4(col, 1.0);
   }
 `
 
 function BlobMesh() {
-  const meshRef     = useRef<THREE.Mesh>(null)
-  const matRef      = useRef<THREE.ShaderMaterial | null>(null)
-  const drag        = useRef({ active: false, lastX: 0, lastY: 0, velX: 0, velY: 0 })
-  const hoverTarget = useRef(0)
+  const meshRef = useRef<THREE.Mesh>(null)
+  const matRef  = useRef<THREE.ShaderMaterial | null>(null)
+  const drag    = useRef({ active: false, lastX: 0, lastY: 0, velX: 0, velY: 0 })
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
@@ -558,8 +581,7 @@ function BlobMesh() {
 
   const uniforms = useMemo(() => ({
     uTime:    { value: 0 },
-    uDistort: { value: 0.42 },
-    uHover:   { value: 0 },
+    uDistort: { value: 0.28 },
   }), [])
 
   useFrame((state, delta) => {
@@ -568,8 +590,7 @@ function BlobMesh() {
     const mat  = matRef.current
     const d    = drag.current
 
-    mat.uniforms.uTime.value   = state.clock.elapsedTime
-    mat.uniforms.uHover.value += (hoverTarget.current - mat.uniforms.uHover.value) * delta * 4
+    mat.uniforms.uTime.value = state.clock.elapsedTime
 
     if (!d.active) {
       mesh.rotation.y += delta * 0.20 + d.velY
@@ -584,19 +605,20 @@ function BlobMesh() {
   return (
     <mesh
       ref={meshRef}
-      onPointerEnter={() => { hoverTarget.current = 1 }}
-      onPointerLeave={() => { hoverTarget.current = 0 }}
       onPointerDown={(e) => {
         drag.current = { active: true, lastX: e.clientX, lastY: e.clientY, velX: 0, velY: 0 }
         e.stopPropagation()
       }}
     >
-      <sphereGeometry args={[1, 128, 128]} />
+      <sphereGeometry args={[1.8, 128, 128]} />
       <shaderMaterial
         ref={matRef}
         vertexShader={BLOB_VERT}
         fragmentShader={BLOB_FRAG}
         uniforms={uniforms}
+        transparent
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
       />
     </mesh>
   )
@@ -604,25 +626,15 @@ function BlobMesh() {
 
 function HeroObject() {
   return (
-    <div style={{ width: 560, height: 560, marginRight: -32 }} className="select-none">
+    <div style={{ width: 640, height: 620, marginRight: -48 }} className="select-none">
       <Canvas
-        camera={{ position: [0, 0, 2.8], fov: 45 }}
+        camera={{ position: [0, 0, 4.5], fov: 55 }}
         dpr={[1, 2]}
         gl={{ antialias: true, alpha: true }}
         style={{ background: 'transparent' }}
         onCreated={({ gl }) => gl.setClearColor(0x000000, 0)}
       >
-        <Suspense fallback={null}>
-          <BlobMesh />
-          <EffectComposer>
-            <Bloom
-              luminanceThreshold={0.55}
-              luminanceSmoothing={0.85}
-              intensity={1.4}
-              mipmapBlur
-            />
-          </EffectComposer>
-        </Suspense>
+        <BlobMesh />
       </Canvas>
     </div>
   )
@@ -721,7 +733,7 @@ function HeroSection() {
       </div>
 
       {/* ── Two-column main area ── */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_560px] items-center gap-x-10">
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_640px] items-center gap-x-10">
 
         {/* Left: headline + CTA */}
         <div>
