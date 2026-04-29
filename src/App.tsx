@@ -471,9 +471,10 @@ function CapabilityStrip({ reveal }: { reveal: boolean }) {
 const BLOB_VERT = /* glsl */`
   uniform float uTime;
   uniform float uDistort;
-  uniform float uPulse;
+  uniform float uWobble;
   varying vec3  vPos;
   varying vec3  vNorm;
+  varying vec3  vOrigNorm;  // original sphere normal in eye space — stable alpha source
   varying vec3  vViewPos;
 
   float dn(vec3 p) {
@@ -488,9 +489,12 @@ const BLOB_VERT = /* glsl */`
   }
 
   void main() {
-    vPos = position;
-    // Subtle shape puff on click — keep inflation small, let lighting do the work
-    float dist = uDistort * (1.0 + uPulse * 0.28);
+    vPos     = position;
+    // Original sphere normal in eye space (pre-displacement, used for stable alpha)
+    vOrigNorm = normalize(normalMatrix * normalize(position));
+
+    // Wobble: signed damped sinusoid → blob slowly inflates then settles
+    float dist = uDistort * (1.0 + uWobble * 0.65);
     float e    = 0.010;
     vec3 p0 = dp(position,              dist);
     vec3 px = dp(position + vec3(e,0,0), dist);
@@ -501,12 +505,13 @@ const BLOB_VERT = /* glsl */`
   }
 `
 
-// Fragment shader: aurora + iridescence + click pulse
+// Fragment shader: aurora + iridescence + slime wobble on click
 const BLOB_FRAG = /* glsl */`
   uniform float uTime;
-  uniform float uPulse;
+  uniform float uWobble;
   varying vec3  vPos;
   varying vec3  vNorm;
+  varying vec3  vOrigNorm;
   varying vec3  vViewPos;
 
   void main() {
@@ -526,14 +531,13 @@ const BLOB_FRAG = /* glsl */`
     base = mix(base, c2, n2 * 0.60);
     base = mix(base, c3, n3 * 0.45);
 
-    // ── View / normal ─────────────────────────────────────────────
+    // ── View / normals ────────────────────────────────────────────
     vec3 vd = normalize(-vViewPos);
     vec3 n  = normalize(vNorm);
-    // facing: 1 at center (facing camera), 0 at silhouette, negative behind
-    float facing = dot(n, vd);
-    float fpos   = max(facing, 0.0);   // clamped, used for lighting
+    // Displaced facing for shading (accurate 3-D lighting on bumps)
+    float fpos = max(dot(n, vd), 0.0);
 
-    // ── Diffuse + specular ────────────────────────────────────────
+    // ── Diffuse + specular (displaced normals) ────────────────────
     vec3  l1 = normalize(vec3( 2.5,  3.5, 3.0));
     float d1 = max(dot(n, l1), 0.0);
     float s1 = pow(max(dot(reflect(-l1, n), vd), 0.0), 64.0) * 0.55;
@@ -541,32 +545,32 @@ const BLOB_FRAG = /* glsl */`
     float d2 = max(dot(n, l2), 0.0) * 0.30;
     float s2 = pow(max(dot(reflect(-l2, n), vd), 0.0), 22.0) * 0.22;
 
-    // ── Base lit color ────────────────────────────────────────────
     vec3 col = base * (0.20 + d1 * 0.85 + d2);
     col += vec3(s1);
     col += base * s2;
 
     // ── Iridescent thin-film ──────────────────────────────────────
-    // Angle-dependent rainbow shimmer; bursts brighter on click
     float ird = 1.0 - fpos;
     vec3 irid = 0.5 + 0.5 * cos(
-      vec3(0.0, 2.094, 4.189) +   // 120° R/G/B phase offsets
-      ird * 4.5 + uTime * 0.28
+      vec3(0.0, 2.094, 4.189) + ird * 4.5 + uTime * 0.28
     );
-    float iridStr = pow(ird, 1.6) * (0.52 + uPulse * 0.90);
+    // Wobble expansion phase (uWobble > 0) bursts iridescence
+    float wpos = max(uWobble, 0.0);
+    float iridStr = pow(ird, 1.6) * (0.52 + wpos * 1.10);
     col += irid * iridStr;
 
-    // Pulse: warm the whole surface briefly
-    col *= (1.0 + uPulse * 0.20);
+    col *= (1.0 + wpos * 0.22);
 
     col = pow(clamp(col, 0.0, 1.0), vec3(0.82));
 
-    // ── Premultiplied alpha ───────────────────────────────────────
-    // alpha = fpos (0 at silhouette/back, 1 at center facing camera)
-    // Back-facing fragments → alpha=0 → add nothing to framebuffer.
-    // Fixes double-layer AND disappearing-when-rotated in one move:
-    // no discard needed, no depth tricks, order-independent.
-    float alpha = fpos;
+    // ── Premultiplied alpha from ORIGINAL sphere geometry ─────────
+    // Using original (pre-displacement) sphere normal for alpha gives a
+    // stable hemisphere mask: always visible from the front, always zero
+    // on the back — unaffected by displacement noise fluctuations.
+    // smoothstep gives a soft edge rather than a hard clip.
+    float origFacing = dot(normalize(vOrigNorm), vd);
+    float alpha = smoothstep(-0.04, 0.28, origFacing);
+
     gl_FragColor = vec4(col * alpha, alpha);
   }
 `
@@ -603,7 +607,7 @@ function BlobMesh() {
   const uniforms = useMemo(() => ({
     uTime:    { value: 0 },
     uDistort: { value: 0.28 },
-    uPulse:   { value: 0 },
+    uWobble:  { value: 0 },
   }), [])
 
   useFrame((state, delta) => {
@@ -615,16 +619,15 @@ function BlobMesh() {
     clockNow.current = state.clock.elapsedTime
     mat.uniforms.uTime.value = state.clock.elapsedTime
 
-    // Smooth click pulse: smoothstep rise over 0.45 s, then gentle exp decay ~2.5 s
+    // Damped sinusoidal wobble — "slime in gravity":
+    //   sin(t * 2.0) → period 3.1 s, first peak at ~0.79 s (slow, satisfying)
+    //   exp(-t * 1.2) → ~1 clean oscillation before settling
+    //   starts at 0 (no jump), positive = inflate, negative = slight deflate
     const tp = state.clock.elapsedTime - clickTime.current
-    if (tp <= 0) {
-      mat.uniforms.uPulse.value = 0
-    } else if (tp < 0.45) {
-      const x = tp / 0.45
-      mat.uniforms.uPulse.value = x * x * (3 - 2 * x)   // smoothstep 0 → 1
-    } else {
-      mat.uniforms.uPulse.value = Math.exp(-(tp - 0.45) * 1.4)  // gentle exp decay
-    }
+    mat.uniforms.uWobble.value =
+      tp > 0 && tp < 7.0
+        ? Math.sin(tp * 2.0) * Math.exp(-tp * 1.2)
+        : 0
 
     if (!d.active) {
       mesh.rotation.y += delta * 0.20 + d.velY
