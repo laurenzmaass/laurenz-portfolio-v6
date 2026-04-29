@@ -489,8 +489,8 @@ const BLOB_VERT = /* glsl */`
 
   void main() {
     vPos = position;
-    // Pulse inflates the blob on click
-    float dist = uDistort * (1.0 + uPulse * 0.80);
+    // Subtle shape puff on click — keep inflation small, let lighting do the work
+    float dist = uDistort * (1.0 + uPulse * 0.28);
     float e    = 0.010;
     vec3 p0 = dp(position,              dist);
     vec3 px = dp(position + vec3(e,0,0), dist);
@@ -529,10 +529,9 @@ const BLOB_FRAG = /* glsl */`
     // ── View / normal ─────────────────────────────────────────────
     vec3 vd = normalize(-vViewPos);
     vec3 n  = normalize(vNorm);
+    // facing: 1 at center (facing camera), 0 at silhouette, negative behind
     float facing = dot(n, vd);
-
-    // Discard back-facing fragments (displacement can flip winding near silhouette)
-    if (facing < 0.0) discard;
+    float fpos   = max(facing, 0.0);   // clamped, used for lighting
 
     // ── Diffuse + specular ────────────────────────────────────────
     vec3  l1 = normalize(vec3( 2.5,  3.5, 3.0));
@@ -543,34 +542,32 @@ const BLOB_FRAG = /* glsl */`
     float s2 = pow(max(dot(reflect(-l2, n), vd), 0.0), 22.0) * 0.22;
 
     // ── Base lit color ────────────────────────────────────────────
-    vec3 col = base * (0.20 + d1 * 0.80 + d2);
+    vec3 col = base * (0.20 + d1 * 0.85 + d2);
     col += vec3(s1);
     col += base * s2;
 
-    // Edge glow in aurora colors — NO separate tint, so no second-layer shell
-    float edgeAmt = pow(1.0 - facing, 2.2);
-    col += base * edgeAmt * (0.45 + uPulse * 0.70);
-
-    // Pulse brightens the whole surface
-    col *= (1.0 + uPulse * 0.25);
-
-    // ── Additive depth cue ────────────────────────────────────────
-    // Small floor (0.12) keeps the blob visible from all rotation angles;
-    // discard above already blocks any true back-facing geometry.
-    col *= (0.12 + facing * 0.88);
-
-    // ── Iridescent thin-film — applied AFTER depth cue ────────────
-    // At edges facing≈0, ird≈1 → rainbow sheen clearly visible
-    float ird = 1.0 - facing;
+    // ── Iridescent thin-film ──────────────────────────────────────
+    // Angle-dependent rainbow shimmer; bursts brighter on click
+    float ird = 1.0 - fpos;
     vec3 irid = 0.5 + 0.5 * cos(
       vec3(0.0, 2.094, 4.189) +   // 120° R/G/B phase offsets
       ird * 4.5 + uTime * 0.28
     );
-    float iridStr = pow(ird, 1.5) * (0.65 + uPulse * 0.95);
+    float iridStr = pow(ird, 1.6) * (0.52 + uPulse * 0.90);
     col += irid * iridStr;
 
+    // Pulse: warm the whole surface briefly
+    col *= (1.0 + uPulse * 0.20);
+
     col = pow(clamp(col, 0.0, 1.0), vec3(0.82));
-    gl_FragColor = vec4(col, 1.0);
+
+    // ── Premultiplied alpha ───────────────────────────────────────
+    // alpha = fpos (0 at silhouette/back, 1 at center facing camera)
+    // Back-facing fragments → alpha=0 → add nothing to framebuffer.
+    // Fixes double-layer AND disappearing-when-rotated in one move:
+    // no discard needed, no depth tricks, order-independent.
+    float alpha = fpos;
+    gl_FragColor = vec4(col * alpha, alpha);
   }
 `
 
@@ -618,16 +615,15 @@ function BlobMesh() {
     clockNow.current = state.clock.elapsedTime
     mat.uniforms.uTime.value = state.clock.elapsedTime
 
-    // Smooth click pulse: cubic ease-in rise (0 → 1 over 0.28 s), then exp decay
-    // This removes the hard "jump to 1" that made it feel hectic
+    // Smooth click pulse: smoothstep rise over 0.45 s, then gentle exp decay ~2.5 s
     const tp = state.clock.elapsedTime - clickTime.current
-    if (tp < 0) {
+    if (tp <= 0) {
       mat.uniforms.uPulse.value = 0
-    } else if (tp < 0.28) {
-      const x = tp / 0.28
+    } else if (tp < 0.45) {
+      const x = tp / 0.45
       mat.uniforms.uPulse.value = x * x * (3 - 2 * x)   // smoothstep 0 → 1
     } else {
-      mat.uniforms.uPulse.value = Math.exp(-(tp - 0.28) * 1.8)  // slow exp decay ~2 s
+      mat.uniforms.uPulse.value = Math.exp(-(tp - 0.45) * 1.4)  // gentle exp decay
     }
 
     if (!d.active) {
@@ -656,7 +652,11 @@ function BlobMesh() {
         fragmentShader={BLOB_FRAG}
         uniforms={uniforms}
         transparent
-        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+        blending={THREE.CustomBlending}
+        blendEquation={THREE.AddEquation}
+        blendSrc={THREE.OneFactor}
+        blendDst={THREE.OneMinusSrcAlphaFactor}
       />
     </mesh>
   )
